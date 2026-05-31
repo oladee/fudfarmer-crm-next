@@ -1,3 +1,5 @@
+import type { AppUser } from './types/api';
+
 export enum CustomerType {
   B2C = 'B2C',
   B2B = 'B2B',
@@ -322,9 +324,11 @@ export interface Enquiry {
 }
 
 export interface AuthContextType {
-  user: Agent | null;
-  login: (agentId: string, password: string) => Promise<boolean>;
-  logout: () => void;
-  updateProfile: (updates: Partial<Agent>) => Promise<void>;
+  user: AppUser | null;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
   isAuthenticated: boolean;
+  loading: boolean;
+  error: boolean;
+  refetch: () => void;
 }

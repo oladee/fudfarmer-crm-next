@@ -3,16 +3,17 @@
 import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import {
-  useCustomers, useSaveCustomers, useAgents, useCredits,
-  useSales, useFeedback, useEnquiries, useCompensations, useHubs,
+  useCustomers, useCreateCustomer, useUpdateCustomer, useAgents,
+  useCustomerCredits, useSales, useFeedback, useEnquiries, useCompensations, useHubs,
 } from '@/hooks/use-queries';
-import { StorageService } from '@/lib/storage-service';
 import {
   Customer, CustomerType, PREDEFINED_SEGMENTS,
-  CreditGrade, Sale, Feedback, Enquiry, Compensation, CreditRecord,
+  CreditGrade, Sale, Feedback, Enquiry, Compensation,
 } from '@/types';
 import { toast } from 'sonner';
 import { usePermissions } from '@/hooks/use-permissions';
+import { useHubScopeFilter } from '@/hooks/use-hub-scope';
+import { HubScopeFilterBar } from '@/components/hub-scope-filter';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer,
 } from 'recharts';
@@ -30,23 +31,24 @@ type DetailTab = 'overview' | 'purchases' | 'credit' | 'interactions';
 export default function CustomersPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
-  const { data: customers = [] } = useCustomers();
+  const hubScope = useHubScopeFilter();
+  const { data: customers = [] } = useCustomers({ hub_id: hubScope.hubIdForApi });
   const { data: agents = [] } = useAgents();
-  const { data: credits = [] } = useCredits();
   const { data: sales = [] } = useSales();
   const { data: feedback = [] } = useFeedback();
   const { data: enquiries = [] } = useEnquiries();
   const { data: compensations = [] } = useCompensations();
   const { data: hubs = [] } = useHubs();
   const activeHubs = hubs.filter(h => h.isActive);
-  const saveCustomers = useSaveCustomers();
+  const createCustomer = useCreateCustomer();
+  const updateCustomer = useUpdateCustomer();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<CustomerType | 'All'>('All');
-  const [filterLocation, setFilterLocation] = useState<string>('All');
   const [filterSegment, setFilterSegment] = useState<string>('All');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const { data: customerCredits = [] } = useCustomerCredits(selectedCustomer?.id ?? null);
   const [detailTab, setDetailTab] = useState<DetailTab>('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Customer>>({});
@@ -87,7 +89,7 @@ export default function CustomersPage() {
 
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
     name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C,
-    location: 'Lagos', segments: [], totalOrders: 0, totalSpent: 0,
+    location: hubScope.defaultHubName || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0,
   });
 
   // --- Helpers ---
@@ -98,18 +100,10 @@ export default function CustomersPage() {
   };
 
   const calculateScore = (customerId: string): CreditGrade => {
-    const record = credits.find((c) => c.customerId === customerId);
-    if (!record || !record.repaymentTimelines || record.repaymentTimelines.length === 0) {
-      if (record?.status === 'Overdue') return 'F';
-      return 'N/A';
-    }
-    const avgDays = record.repaymentTimelines.reduce((a, b) => a + b, 0) / record.repaymentTimelines.length;
-    if (record.status === 'Overdue') return 'F';
-    if (avgDays === 0) return 'A';
-    if (avgDays <= 1) return 'B';
-    if (avgDays <= 2) return 'C';
-    if (avgDays <= 7) return 'D';
-    return 'F';
+    const items = customerId === selectedCustomer?.id ? customerCredits : [];
+    if (items.length === 0) return 'N/A';
+    if (items.some((c) => c.status === 'Overdue')) return 'F';
+    return 'B';
   };
 
   const getStatus = (c: Customer) => c.totalOrders > 1 ? 'Repeat' : 'New';
@@ -162,26 +156,31 @@ export default function CustomersPage() {
       c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.companyName && c.companyName.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchSegment = filterSegment === 'All' || c.segments?.includes(filterSegment);
-    return matchSearch && (filterType === 'All' || c.type === filterType) && (filterLocation === 'All' || c.location === filterLocation) && matchSegment;
-  }), [customers, searchTerm, filterType, filterLocation, filterSegment]);
+    return matchSearch && (filterType === 'All' || c.type === filterType) && hubScope.matchesHub(c.location) && matchSegment;
+  }), [customers, searchTerm, filterType, hubScope, filterSegment]);
 
   // --- Add Customer ---
   const handleSaveCustomer = () => {
     if (!newCustomer.name || !newCustomer.email) { toast.error('Please enter Name and Email.'); return; }
     const dup = customers.find((c) => c.email.toLowerCase() === newCustomer.email!.toLowerCase());
     if (dup) { toast.error(`A customer with email "${newCustomer.email}" already exists.`); return; }
-    const agent = agents.find((a) => a.id === newCustomer.addedByAgentId);
-    const customer: Customer = {
-      id: StorageService.generateId(), name: newCustomer.name!, email: newCustomer.email!,
-      phone: newCustomer.phone || '', type: newCustomer.type as CustomerType,
-      location: newCustomer.location || activeHubs[0]?.name || 'Lagos', companyName: newCustomer.companyName,
-      joinedDate: new Date().toISOString().split('T')[0], segments: newCustomer.segments || [],
-      totalOrders: 0, totalSpent: 0, addedByAgentId: newCustomer.addedByAgentId, addedByAgentName: agent?.name,
-    };
-    saveCustomers.mutate([customer, ...customers]);
-    setShowAddModal(false);
-    setNewCustomer({ name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C, location: activeHubs[0]?.name || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0 });
-    toast.success('Customer added.');
+    const hub = activeHubs.find((h) => h.name === (newCustomer.location || activeHubs[0]?.name));
+    createCustomer.mutate({
+      customer_name: newCustomer.name!,
+      customer_email: newCustomer.email!,
+      customer_phone: newCustomer.phone || '0000000000',
+      customer_type: newCustomer.type as CustomerType,
+      customer_location: hub?.id || activeHubs[0]?.id || '',
+      company_name: newCustomer.companyName,
+      assigned_agent: newCustomer.addedByAgentId,
+    }, {
+      onSuccess: () => {
+        setShowAddModal(false);
+        setNewCustomer({ name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C, location: activeHubs[0]?.name || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0 });
+        toast.success('Customer added.');
+      },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
   const toggleSegment = (segment: string) => {
@@ -197,12 +196,24 @@ export default function CustomersPage() {
   };
 
   const handleUpdateCustomer = () => {
-    if (!editForm.name || !editForm.email) { toast.error('Name and Email are required.'); return; }
-    const updated = customers.map((c) => c.id === selectedCustomer?.id ? { ...c, ...editForm } as Customer : c);
-    saveCustomers.mutate(updated);
-    setSelectedCustomer({ ...selectedCustomer!, ...editForm } as Customer);
-    setIsEditing(false);
-    toast.success('Customer updated.');
+    if (!editForm.name || !editForm.email || !selectedCustomer) { toast.error('Name and Email are required.'); return; }
+    const hub = activeHubs.find((h) => h.name === editForm.location);
+    updateCustomer.mutate({
+      id: selectedCustomer.id,
+      customer_name: editForm.name,
+      customer_email: editForm.email,
+      customer_phone: editForm.phone,
+      customer_type: editForm.type,
+      customer_location: hub?.id,
+      company_name: editForm.companyName,
+    }, {
+      onSuccess: (updated) => {
+        setSelectedCustomer(updated);
+        setIsEditing(false);
+        toast.success('Customer updated.');
+      },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
   const toggleEditSegment = (segment: string) => {
@@ -218,10 +229,13 @@ export default function CustomersPage() {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [selectedCustomer, sales]);
 
-  const customerCredit = useMemo(() => {
-    if (!selectedCustomer) return null;
-    return credits.find((c) => c.customerId === selectedCustomer.id) || null;
-  }, [selectedCustomer, credits]);
+  const customerCreditTotal = useMemo(() => {
+    return customerCredits.reduce((sum, c) => sum + c.amountOwed, 0);
+  }, [customerCredits]);
+
+  const customerCreditOverdue = useMemo(() => {
+    return customerCredits.some((c) => c.status === 'Overdue');
+  }, [customerCredits]);
 
   const customerFeedback = useMemo(() => {
     if (!selectedCustomer) return [];
@@ -329,12 +343,7 @@ export default function CustomersPage() {
               <option value="All">All Types</option><option value={CustomerType.B2C}>B2C</option><option value={CustomerType.B2B}>B2B</option>
             </select>
           </div>
-          <div className="flex items-center gap-2 border rounded-md px-3 py-2 bg-background">
-            <MapPin size={14} className="text-muted-foreground" />
-            <select value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)} className="bg-transparent border-none text-sm font-medium focus:outline-none">
-              <option value="All">All Locations</option>{activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
-            </select>
-          </div>
+          <HubScopeFilterBar scope={hubScope} />
           {activeSegments.length > 0 && (
             <div className="flex items-center gap-2 border rounded-md px-3 py-2 bg-background">
               <Heart size={14} className="text-muted-foreground" />
@@ -440,7 +449,13 @@ export default function CustomersPage() {
               <div className="space-y-2"><label className="text-sm font-medium">Phone</label><input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
               <div className="space-y-2"><label className="text-sm font-medium">Company (Optional)</label><input type="text" value={newCustomer.companyName} onChange={(e) => setNewCustomer({ ...newCustomer, companyName: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
               <div className="space-y-2"><label className="text-sm font-medium">Type</label><select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value as CustomerType })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value={CustomerType.B2C}>B2C</option><option value={CustomerType.B2B}>B2B</option></select></div>
-              <div className="space-y-2"><label className="text-sm font-medium">Location</label><select value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">{activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}</select></div>
+              <div className="space-y-2"><label className="text-sm font-medium">Location</label>
+                {hubScope.canSwitchHubs ? (
+                  <select value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">{hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}</select>
+                ) : (
+                  <input type="text" readOnly disabled value={hubScope.hubName} className="flex h-10 w-full rounded-md border border-input bg-muted px-3 py-2 text-sm opacity-80" />
+                )}
+              </div>
               <div className="space-y-2"><label className="text-sm font-medium">Assigned Agent</label><select value={newCustomer.addedByAgentId || ''} onChange={(e) => setNewCustomer({ ...newCustomer, addedByAgentId: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">-- Select --</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
             </div>
             <div className="mt-4 space-y-2 md:col-span-2">
@@ -676,9 +691,13 @@ export default function CustomersPage() {
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Location</label>
-                      <select value={editForm.location || activeHubs[0]?.name || 'Lagos'} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
-                        {activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
-                      </select>
+                      {hubScope.canSwitchHubs ? (
+                        <select value={editForm.location || hubScope.defaultHubName} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
+                          {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                        </select>
+                      ) : (
+                        <input type="text" readOnly disabled value={hubScope.hubName} className="flex h-9 w-full rounded-md border border-input bg-muted px-3 py-1 text-sm opacity-80" />
+                      )}
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -843,72 +862,43 @@ export default function CustomersPage() {
               {/* ===== CREDIT & PAYMENTS TAB ===== */}
               {detailTab === 'credit' && (
                 <div className="space-y-5">
-                  {customerCredit ? (
+                  {customerCredits.length > 0 ? (
                     <>
-                      {/* Credit status header */}
                       <div className={`p-4 rounded-xl border-2 ${
-                        customerCredit.status === 'Overdue' ? 'border-red-300 bg-red-50' :
-                        customerCredit.status === 'Pending' ? 'border-orange-300 bg-orange-50' :
-                        'border-green-300 bg-green-50'
+                        customerCreditOverdue ? 'border-red-300 bg-red-50' : 'border-orange-300 bg-orange-50'
                       }`}>
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-xs font-bold uppercase text-muted-foreground">Outstanding Balance</p>
-                            <p className="text-3xl font-black">&#8358;{customerCredit.amountOwed.toLocaleString()}</p>
+                            <p className="text-xs font-bold uppercase text-muted-foreground">Total Outstanding</p>
+                            <p className="text-3xl font-black">&#8358;{customerCreditTotal.toLocaleString()}</p>
                           </div>
                           <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold ${
-                            customerCredit.status === 'Overdue' ? 'bg-red-200 text-red-800' :
-                            customerCredit.status === 'Pending' ? 'bg-orange-200 text-orange-800' :
-                            'bg-green-200 text-green-800'
+                            customerCreditOverdue ? 'bg-red-200 text-red-800' : 'bg-orange-200 text-orange-800'
                           }`}>
-                            {customerCredit.status === 'Overdue' && <AlertTriangle size={14} />}
-                            {customerCredit.status}
+                            {customerCreditOverdue && <AlertTriangle size={14} />}
+                            {customerCredits.length} open item{customerCredits.length !== 1 ? 's' : ''}
                           </span>
                         </div>
                       </div>
 
-                      {/* Credit details */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="p-3 rounded-lg border bg-muted/20">
-                          <p className="text-[10px] font-bold uppercase text-muted-foreground">Date Issued</p>
-                          <p className="text-sm font-medium">{customerCredit.dateIssued}</p>
-                        </div>
-                        {customerCredit.dueDate && (
-                          <div className="p-3 rounded-lg border bg-muted/20">
-                            <p className="text-[10px] font-bold uppercase text-muted-foreground">Due Date</p>
-                            <p className="text-sm font-medium">{customerCredit.dueDate}</p>
+                      <div className="space-y-2">
+                        {customerCredits.map((cr) => (
+                          <div key={cr.id} className="p-3 rounded-lg border bg-muted/10 text-sm">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-medium">{cr.sale?.productDetails || `Sale ${cr.sale?.date || cr.dateIssued}`}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cr.status === 'Overdue' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>{cr.status}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span>Due: {cr.dueDate}</span>
+                              <span className="font-bold text-foreground">&#8358;{cr.amountOwed.toLocaleString()}</span>
+                            </div>
                           </div>
-                        )}
-                        {customerCredit.lastPaymentDate && (
-                          <div className="p-3 rounded-lg border bg-muted/20">
-                            <p className="text-[10px] font-bold uppercase text-muted-foreground">Last Payment</p>
-                            <p className="text-sm font-medium">{customerCredit.lastPaymentDate}</p>
-                          </div>
-                        )}
-                        {customerCredit.paymentTerms && (
-                          <div className="p-3 rounded-lg border bg-muted/20">
-                            <p className="text-[10px] font-bold uppercase text-muted-foreground">Payment Terms</p>
-                            <p className="text-sm font-medium">{customerCredit.paymentTerms}</p>
-                          </div>
-                        )}
+                        ))}
                       </div>
 
-                      {/* Credit score */}
                       <div className="p-4 rounded-xl border bg-muted/20">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-[10px] font-bold uppercase text-muted-foreground mb-1">Credit Score</p>
-                            {getScoreBadge(calculateScore(selectedCustomer.id))}
-                          </div>
-                          {customerCredit.repaymentTimelines && customerCredit.repaymentTimelines.length > 0 && (
-                            <div className="text-right">
-                              <p className="text-[10px] font-bold uppercase text-muted-foreground">Avg Repayment</p>
-                              <p className="text-sm font-medium">
-                                {(customerCredit.repaymentTimelines.reduce((a, b) => a + b, 0) / customerCredit.repaymentTimelines.length).toFixed(1)} days
-                              </p>
-                            </div>
-                          )}
-                        </div>
+                        <p className="text-[10px] font-bold uppercase text-muted-foreground mb-1">Credit Score</p>
+                        {selectedCustomer && getScoreBadge(calculateScore(selectedCustomer.id))}
                       </div>
 
                       {/* Credit vs Cash breakdown */}

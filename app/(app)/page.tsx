@@ -4,10 +4,7 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
-import {
-  useCustomers, useSales, useAgents,
-  useInventory, useCredits, useFeedback, useEnquiries,
-} from '@/hooks/use-queries';
+import { useDashboardMetrics } from '@/hooks/use-queries';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend,
@@ -57,16 +54,37 @@ export default function DashboardPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
 
   const { can, user } = usePermissions();
-  const { data: customers = [] } = useCustomers();
-  const { data: sales = [] } = useSales();
-  const { data: agents = [] } = useAgents();
-  const { data: inventory = [] } = useInventory();
-  const { data: credits = [] } = useCredits();
-  const { data: feedbacks = [] } = useFeedback();
-  const { data: enquiries = [] } = useEnquiries();
+  const { data: metrics } = useDashboardMetrics();
+
+  const customers = metrics?.customers ?? [];
+  const sales = metrics?.sales ?? [];
+  const inventory = metrics?.inventory ?? [];
+  const creditSummaries = metrics?.creditSummaries ?? [];
+  const feedbacks = metrics?.feedbacks ?? [];
+  const enquiries = metrics?.enquiries ?? [];
+  const tracker = metrics ? {
+    todayRevenue: metrics.revenueToday,
+    todayOrders: metrics.salesToday,
+    stockAlerts: metrics.lowStockCount + metrics.outOfStockCount,
+    lowStock: metrics.lowStockCount,
+    outOfStock: metrics.outOfStockCount,
+    overdueCredits: metrics.overdueCreditsCount,
+    overdueAmount: metrics.overdueAmount,
+    openTickets: metrics.openTickets,
+    openFeedback: metrics.openFeedback,
+    openEnquiries: metrics.openEnquiries,
+    totalCustomers: metrics.totalCustomers,
+    newCustomersThisMonth: metrics.newCustomersThisMonth,
+    totalOutstanding: metrics.totalOutstanding,
+  } : {
+    todayRevenue: 0, todayOrders: 0, stockAlerts: 0, lowStock: 0, outOfStock: 0,
+    overdueCredits: 0, overdueAmount: 0, openTickets: 0, openFeedback: 0, openEnquiries: 0,
+    totalCustomers: 0, newCustomersThisMonth: 0, totalOutstanding: 0,
+  };
 
   const cutoff = useMemo(() => getCutoff(period), [period]);
   const periodSales = useMemo(() => cutoff ? sales.filter((s) => new Date(s.date) >= cutoff) : sales, [sales, cutoff]);
+  const apiRevenueTrend = metrics?.revenueTrend ?? [];
 
   const catCutoff = useMemo(() => getCutoff(catPeriod), [catPeriod]);
   const catPeriodSales = useMemo(() => catCutoff ? sales.filter((s) => new Date(s.date) >= catCutoff) : sales, [sales, catCutoff]);
@@ -85,15 +103,22 @@ export default function DashboardPage() {
     // Chart data
     const dailyMap: Record<string, number> = {};
     periodSales.forEach((s) => { dailyMap[s.date] = (dailyMap[s.date] || 0) + s.amount; });
-    const trend = Object.entries(dailyMap)
+    const trendFromSales = Object.entries(dailyMap)
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, rev]) => ({
         date: new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
         revenue: rev,
       }));
+    const trend =
+      period === 'month' && apiRevenueTrend.length > 0
+        ? apiRevenueTrend.map((row) => ({
+            date: new Date(row.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+            revenue: row.amount,
+          }))
+        : trendFromSales;
 
     return { revenue, orders, profit, aov, cashRevenue, creditRevenue, walkIn, delivery, trend };
-  }, [periodSales]);
+  }, [periodSales, period, apiRevenueTrend]);
 
   // ═══ REVENUE BY CATEGORY ═══
   const categoryData = useMemo(() => {
@@ -142,63 +167,33 @@ export default function DashboardPage() {
 
   // ═══ CREDIT BOOK ═══
   const creditData = useMemo(() => {
-    const outstanding = credits.filter((c) => c.status !== 'Clear');
-    const totalOwed = outstanding.reduce((a, c) => a + c.amountOwed, 0);
-    const overdue = credits.filter((c) => c.status === 'Overdue');
-    const overdueTotal = overdue.reduce((a, c) => a + c.amountOwed, 0);
-    const pending = credits.filter((c) => c.status === 'Pending');
-    const pendingTotal = pending.reduce((a, c) => a + c.amountOwed, 0);
-    const cleared = credits.filter((c) => c.status === 'Clear');
-    const clearedTotal = cleared.reduce((a, c) => a + c.amountOwed, 0);
+    const outstanding = creditSummaries.filter((c) => c.totalOutstanding > 0);
+    const totalOwed = outstanding.reduce((a, c) => a + c.totalOutstanding, 0);
+    const overdue = creditSummaries.filter((c) => c.overdueCount > 0);
+    const overdueTotal = overdue.reduce((a, c) => a + c.totalOutstanding, 0);
+    const pending = creditSummaries.filter((c) => c.openCreditCount > 0 && c.overdueCount === 0);
+    const pendingTotal = pending.reduce((a, c) => a + c.totalOutstanding, 0);
 
-    // Pie chart for status breakdown
     const statusChart = [
       { name: 'Pending', value: pendingTotal, fill: '#f59e0b' },
       { name: 'Overdue', value: overdueTotal, fill: '#ef4444' },
-      { name: 'Cleared', value: clearedTotal, fill: '#16a34a' },
     ].filter((s) => s.value > 0);
 
     return {
       outstanding: outstanding.length, totalOwed,
       overdue: overdue.length, overdueTotal,
       pending: pending.length, pendingTotal,
-      records: outstanding.slice(0, 5),
+      records: outstanding.slice(0, 5).map((c) => ({
+        id: c.customerId,
+        customerName: c.customerName,
+        amountOwed: c.totalOutstanding,
+        status: c.overdueCount > 0 ? 'Overdue' as const : 'Pending' as const,
+      })),
       statusChart,
     };
-  }, [credits]);
+  }, [creditSummaries]);
 
-  // ═══ TRACKER DATA ═══
-  const tracker = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todaySales = sales.filter((s) => new Date(s.date) >= today);
-    const todayRevenue = todaySales.reduce((a, s) => a + s.amount, 0);
-    const todayOrders = todaySales.length;
-
-    const lowStock = inventory.filter((i) => i.currentStock <= i.minStockLevel && i.currentStock > 0).length;
-    const outOfStock = inventory.filter((i) => i.currentStock <= 0).length;
-    const stockAlerts = lowStock + outOfStock;
-
-    const overdueCredits = credits.filter((c) => c.status === 'Overdue');
-    const overdueAmount = overdueCredits.reduce((a, c) => a + c.amountOwed, 0);
-
-    const openFeedback = feedbacks.filter((f) => f.status === 'Open').length;
-    const openEnquiries = enquiries.filter((e) => e.status === 'Open').length;
-    const openTickets = openFeedback + openEnquiries;
-
-    const totalCustomers = customers.length;
-    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const newCustomersThisMonth = customers.filter((c) => new Date(c.joinedDate) >= thisMonthStart).length;
-
-    const totalOutstanding = credits.filter((c) => c.status !== 'Clear').reduce((a, c) => a + c.amountOwed, 0);
-
-    return {
-      todayRevenue, todayOrders, stockAlerts, lowStock, outOfStock,
-      overdueCredits: overdueCredits.length, overdueAmount,
-      openTickets, openFeedback, openEnquiries,
-      totalCustomers, newCustomersThisMonth, totalOutstanding,
-    };
-  }, [sales, inventory, credits, feedbacks, enquiries, customers]);
+  // ═══ TRACKER DATA — derived from useDashboardMetrics ═══
 
   // ═══ PURCHASE HISTORY FOR SELECTED CUSTOMER ═══
   const purchaseHistory = useMemo(() => {

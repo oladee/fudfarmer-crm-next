@@ -1,11 +1,15 @@
 'use client';
 
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
-import { useSales, useSaveSales, useCustomers, useSaveCustomers, useAgents, useInventory, useSaveInventory, useStockLogs, useSaveStockLogs, useCredits, useSaveCredits, useHubs } from '@/hooks/use-queries';
-import { StorageService } from '@/lib/storage-service';
-import { Sale, Customer, InventoryItem, StockLog, StockMovementType, CreditRecord, PaymentTerms, SalesChannel, DeliveryStatus, PaymentType, PaymentMode } from '@/types';
+import { useHubScopeFilter } from '@/hooks/use-hub-scope';
+import { HubScopeSelect } from '@/components/hub-scope-filter';
+import {
+  useSales, useCreateSale, useUpdateSale, useUpdateSaleStatus, useUpdateDeliveryStatus, useVoidSale,
+  useCustomers, useAgents, useInventory, useStockLogs, useCreditSummary, useHubs,
+} from '@/hooks/use-queries';
+import { Sale, PaymentTerms, SalesChannel, DeliveryStatus, PaymentType, PaymentMode } from '@/types';
 import { toast } from 'sonner';
 import {
   Plus, Banknote, Search, TrendingUp, TrendingDown, X, Package, Percent, CreditCard,
@@ -48,26 +52,26 @@ function extractHub(productDetails?: string): string | null {
 export default function SalesPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
-  const { data: sales = [] } = useSales();
-  const { data: customers = [] } = useCustomers();
+  const hubScope = useHubScopeFilter();
+  const { data: sales = [] } = useSales({ hub_id: hubScope.hubIdForApi });
+  const { data: customers = [] } = useCustomers({ hub_id: hubScope.hubIdForApi });
   const { data: agents = [] } = useAgents();
-  const { data: inventory = [] } = useInventory();
+  const { data: inventory = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
   const { data: stockLogs = [] } = useStockLogs();
-  const { data: credits = [] } = useCredits();
+  const { data: creditSummary = [] } = useCreditSummary();
   const { data: hubs = [] } = useHubs();
   const activeHubs = hubs.filter(h => h.isActive);
-  const saveSales = useSaveSales();
-  const saveCustomers = useSaveCustomers();
-  const saveInventory = useSaveInventory();
-  const saveStockLogs = useSaveStockLogs();
-  const saveCredits = useSaveCredits();
+  const createSale = useCreateSale();
+  const updateSale = useUpdateSale();
+  const updateSaleStatus = useUpdateSaleStatus();
+  const updateDeliveryStatusMutation = useUpdateDeliveryStatus();
+  const voidSale = useVoidSale();
   const csvInputRef = useRef<HTMLInputElement>(null);
 
   // ── Filters ──
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAgent, setFilterAgent] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
-  const [filterHub, setFilterHub] = useState<string>('All');
   const [filterChannel, setFilterChannel] = useState<string>('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -76,12 +80,19 @@ export default function SalesPage() {
   // ── Add sale modal ──
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState('');
-  const [selectedHub, setSelectedHub] = useState<string>(user?.location || 'Lagos');
+  const [selectedHub, setSelectedHub] = useState<string>(hubScope.defaultHubName || 'Lagos');
+  useEffect(() => {
+    if (hubScope.defaultHubName) setSelectedHub(hubScope.defaultHubName);
+  }, [hubScope.defaultHubName]);
   const [quantity, setQuantity] = useState(1);
-  const [isCredit, setIsCredit] = useState(false);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(PaymentMode.FULL_PAYMENT);
   const [paymentType, setPaymentType] = useState<PaymentType>(PaymentType.CASH);
   const [amountPaid, setAmountPaid] = useState(0);
+  const [dueDate, setDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split('T')[0];
+  });
   const [newSale, setNewSale] = useState<Partial<Sale>>({ amount: 0, profitMargin: 20, status: 'Pending', date: new Date().toISOString().split('T')[0], paymentTerms: PaymentTerms.COD, notes: '', channel: SalesChannel.WALK_IN, deliveryStatus: DeliveryStatus.NOT_APPLICABLE });
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
@@ -108,18 +119,18 @@ export default function SalesPage() {
     if (!selectedProductId) errors.productId = 'Product is required.';
     if (quantity <= 0) errors.quantity = 'Quantity must be greater than 0.';
     if (selectedInventoryItem && quantity > selectedInventoryItem.currentStock) errors.quantity = `Exceeds stock (${selectedInventoryItem.currentStock}).`;
+    if (paymentMode !== PaymentMode.FULL_PAYMENT && !dueDate) errors.dueDate = 'Due date is required for credit sales.';
     return errors;
-  }, [newSale.customerId, selectedProductId, quantity, selectedInventoryItem]);
+  }, [newSale.customerId, selectedProductId, quantity, selectedInventoryItem, paymentMode, dueDate]);
   const isFormValid = Object.keys(validationErrors).length === 0;
 
   const customerCreditWarning = useMemo(() => {
     if (!newSale.customerId) return null;
-    const existing = credits.find((cr) => cr.customerId === newSale.customerId && cr.status === 'Overdue');
-    if (existing) return `Overdue credit: ${fmt(existing.amountOwed)}`;
-    const pending = credits.find((cr) => cr.customerId === newSale.customerId && cr.status === 'Pending');
-    if (pending) return `Pending credit: ${fmt(pending.amountOwed)}`;
-    return null;
-  }, [newSale.customerId, credits]);
+    const row = creditSummary.find((cr) => cr.customerId === newSale.customerId);
+    if (!row || row.totalOutstanding <= 0) return null;
+    if (row.overdueCount > 0) return `Overdue credit: ${fmt(row.totalOutstanding)} (${row.overdueCount} item${row.overdueCount !== 1 ? 's' : ''})`;
+    return `Outstanding credit: ${fmt(row.totalOutstanding)}`;
+  }, [newSale.customerId, creditSummary]);
 
   // Customer context for form
   const selectedFormCustomer = useMemo(() => {
@@ -129,9 +140,9 @@ export default function SalesPage() {
     const custSales = sales.filter((s) => s.customerId === c.id && s.status !== 'Voided');
     const avgOrder = custSales.length > 0 ? custSales.reduce((a, s) => a + s.amount, 0) / custSales.length : 0;
     const lastSale = custSales.length > 0 ? custSales.sort((a, b) => b.date.localeCompare(a.date))[0]?.date : null;
-    const credit = credits.find((cr) => cr.customerId === c.id);
+    const credit = creditSummary.find((cr) => cr.customerId === c.id);
     return { ...c, avgOrder, lastSale, credit };
-  }, [newSale.customerId, customers, sales, credits]);
+  }, [newSale.customerId, customers, sales, creditSummary]);
 
   // ── Quick date preset handler ──
   const applyPreset = (preset: QuickDatePreset) => {
@@ -147,17 +158,19 @@ export default function SalesPage() {
     const matchSearch = s.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || (s.productDetails || '').toLowerCase().includes(searchTerm.toLowerCase()) || (s.notes || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchAgent = filterAgent === 'All' || s.agentId === filterAgent;
     const matchStatus = filterStatus === 'All' || s.status === filterStatus;
-    const matchHub = filterHub === 'All' || extractHub(s.productDetails) === filterHub;
+    const matchHub = hubScope.matchesHub(extractHub(s.productDetails) ?? undefined);
     const matchChannel = filterChannel === 'All' || s.channel === filterChannel;
     const matchDateFrom = !dateFrom || s.date >= dateFrom;
     const matchDateTo = !dateTo || s.date <= dateTo;
     return matchSearch && matchAgent && matchStatus && matchHub && matchChannel && matchDateFrom && matchDateTo;
-  }), [sales, searchTerm, filterAgent, filterStatus, filterHub, filterChannel, dateFrom, dateTo]);
+  }), [sales, searchTerm, filterAgent, filterStatus, hubScope, filterChannel, dateFrom, dateTo]);
 
-  const hasFilters = searchTerm || filterAgent !== 'All' || filterStatus !== 'All' || filterHub !== 'All' || filterChannel !== 'All' || dateFrom || dateTo;
+  const hasFilters = searchTerm || filterAgent !== 'All' || filterStatus !== 'All' || hubScope.filterHub !== 'All' || filterChannel !== 'All' || dateFrom || dateTo;
 
   const clearFilters = () => {
-    setSearchTerm(''); setFilterAgent('All'); setFilterStatus('All'); setFilterHub('All'); setFilterChannel('All'); setDateFrom(''); setDateTo(''); setQuickPreset('all');
+    setSearchTerm(''); setFilterAgent('All'); setFilterStatus('All');
+    hubScope.setFilterHub(hubScope.canSwitchHubs ? 'All' : hubScope.hubName);
+    setFilterChannel('All'); setDateFrom(''); setDateTo(''); setQuickPreset('all');
   };
 
   // ── KPI computations ──
@@ -177,8 +190,8 @@ export default function SalesPage() {
     const profit = filteredSales.filter((s) => s.status !== 'Voided').reduce((a, s) => a + s.profitAmount, 0);
     const count = filteredSales.filter((s) => s.status !== 'Voided').length;
     const avgOrder = count > 0 ? revenue / count : 0;
-    const creditCount = filteredSales.filter((s) => s.isCredit && s.status !== 'Voided').length;
-    const creditAmount = filteredSales.filter((s) => s.isCredit && s.status !== 'Voided').reduce((a, s) => a + s.amount, 0);
+    const creditCount = filteredSales.filter((s) => s.paymentMode !== PaymentMode.FULL_PAYMENT && s.status !== 'Voided').length;
+    const creditAmount = filteredSales.filter((s) => s.paymentMode !== PaymentMode.FULL_PAYMENT && s.status !== 'Voided').reduce((a, s) => a + s.amount, 0);
     const deliveryCount = filteredSales.filter((s) => s.channel === SalesChannel.DELIVERY && s.status !== 'Voided').length;
 
     const thisRev = thisMonthSales.reduce((a, s) => a + s.amount, 0);
@@ -207,11 +220,10 @@ export default function SalesPage() {
   };
 
   const handleSaveSale = () => {
-    setTouched({ customerId: true, productId: true, quantity: true });
+    setTouched({ customerId: true, productId: true, quantity: true, dueDate: true });
     if (!isFormValid) { toast.error('Please fix validation errors.'); return; }
 
     const customer = customers.find((c) => c.id === newSale.customerId);
-    const agent = agents.find((a) => a.id === (newSale.agentId || user?.id));
     const inventoryItem = inventory.find((i) => i.id === selectedProductId);
     if (!inventoryItem || inventoryItem.currentStock < quantity) { toast.error(`Insufficient stock in ${selectedHub}.`); return; }
 
@@ -219,68 +231,65 @@ export default function SalesPage() {
     const profitMargin = Number(newSale.profitMargin) || 0;
     const profitAmount = (amount * profitMargin) / 100;
     const saleDate = newSale.date || new Date().toISOString().split('T')[0];
-
     const finalAmountPaid = paymentMode === PaymentMode.FULL_PAYMENT ? amount : paymentMode === PaymentMode.FULL_CREDIT ? 0 : amountPaid;
+    const isCreditMode = paymentMode !== PaymentMode.FULL_PAYMENT;
 
-    const sale: Sale = {
-      id: StorageService.generateId(), customerId: newSale.customerId!, customerName: customer?.name || 'Unknown',
-      amount, profitMargin, profitAmount, date: saleDate,
-      agentId: agent?.id || user?.id || 'unknown', agentName: agent?.name || user?.name || 'Unknown',
-      status: newSale.status as Sale['status'], productDetails: `[${selectedHub}] ${newSale.productDetails}`, isCredit,
-      paymentTerms: newSale.paymentTerms, notes: newSale.notes || undefined,
+    createSale.mutate({
+      customer_id: newSale.customerId!,
+      amount,
+      amount_paid: finalAmountPaid,
+      payment_mode: paymentMode,
+      payment_type: isCreditMode ? undefined : paymentType,
+      due_date: isCreditMode ? dueDate : undefined,
+      payment_terms: newSale.paymentTerms,
       channel: newSale.channel || SalesChannel.WALK_IN,
-      deliveryStatus: newSale.deliveryStatus || DeliveryStatus.NOT_APPLICABLE,
-      deliveryAddress: newSale.deliveryAddress, customerPhone: newSale.customerPhone,
-      paymentType: paymentMode === PaymentMode.FULL_CREDIT ? undefined : paymentType,
-      paymentMode, amountPaid: finalAmountPaid,
-    };
-
-    const updatedInventory = inventory.map((i) => i.id === selectedProductId ? { ...i, currentStock: i.currentStock - quantity, lastStockUpdate: saleDate } : i);
-    const stockLog: StockLog = {
-      id: StorageService.generateId(), date: saleDate, itemId: inventoryItem.id, itemName: inventoryItem.name,
-      type: StockMovementType.SALE, quantity: -Math.abs(quantity), uom: inventoryItem.unitOfMeasure,
-      unitCost: inventoryItem.avgUnitCost, unitPrice: amount / quantity, referenceId: sale.id,
-      agentId: user?.id || 'admin', notes: `Sale to ${customer?.name}${isCredit ? ' (CREDIT)' : ''}`,
-    };
-    const updatedCustomers = customers.map((c) => c.id === sale.customerId ? { ...c, totalOrders: c.totalOrders + 1, totalSpent: c.totalSpent + amount } : c);
-
-    if (isCredit) {
-      const creditAmount = amount - finalAmountPaid;
-      if (creditAmount > 0) {
-        const existing = credits.find((cr) => cr.customerId === sale.customerId);
-        if (existing) { saveCredits.mutate(credits.map((cr) => cr.customerId === sale.customerId ? { ...cr, amountOwed: cr.amountOwed + creditAmount, dateIssued: saleDate, status: 'Pending' as const } : cr)); }
-        else { const newCredit: CreditRecord = { id: StorageService.generateId(), customerId: sale.customerId, customerName: sale.customerName, amountOwed: creditAmount, dateIssued: saleDate, status: 'Pending', repaymentTimelines: [] }; saveCredits.mutate([...credits, newCredit]); }
-      }
-    }
-
-    saveSales.mutate([sale, ...sales]);
-    saveInventory.mutate(updatedInventory);
-    saveStockLogs.mutate([stockLog, ...stockLogs]);
-    saveCustomers.mutate(updatedCustomers);
-
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'SALE_STOCK_OUT', entityType: 'Sale', entityId: sale.id, details: `Sold ${quantity} ${inventoryItem.unitOfMeasure} of ${inventoryItem.name} to ${customer?.name}`, location: selectedHub });
-    setShowAddModal(false);
-    resetForm();
-    toast.success('Sale recorded.');
+      delivery_status: newSale.deliveryStatus || DeliveryStatus.NOT_APPLICABLE,
+      delivery_address: newSale.deliveryAddress,
+      notes: newSale.notes || undefined,
+      profit_margin: profitMargin,
+      profit_amount: profitAmount,
+      date: saleDate,
+      items: [{ product_id: selectedProductId, quantity, unit_price: amount / quantity }],
+    }, {
+      onSuccess: (result) => {
+        if (result.creditRecord) {
+          toast.success(`Sale recorded — credit of ${fmt(result.creditRecord.amountOwed)} created, due ${dueDate}`);
+        } else {
+          toast.success('Sale recorded.');
+        }
+        setShowAddModal(false);
+        resetForm();
+      },
+      onError: (err) => toast.error(err.message || 'Failed to record sale.'),
+    });
   };
 
   const resetForm = () => {
     setNewSale({ amount: 0, profitMargin: 0, status: 'Pending', date: new Date().toISOString().split('T')[0], paymentTerms: PaymentTerms.COD, notes: '', channel: SalesChannel.WALK_IN, deliveryStatus: DeliveryStatus.NOT_APPLICABLE });
-    setSelectedProductId(''); setQuantity(1); setIsCredit(false); setPaymentMode(PaymentMode.FULL_PAYMENT); setPaymentType(PaymentType.CASH); setAmountPaid(0); setTouched({});
+    setSelectedProductId(''); setQuantity(1); setPaymentMode(PaymentMode.FULL_PAYMENT); setPaymentType(PaymentType.CASH); setAmountPaid(0);
+    const d = new Date(); d.setDate(d.getDate() + 30);
+    setDueDate(d.toISOString().split('T')[0]);
+    setTouched({});
   };
 
-  // ── Status & delivery updates ──
-  const updateSaleStatus = (id: string, status: Sale['status']) => {
-    saveSales.mutate(sales.map((s) => s.id === id ? { ...s, status } : s));
-    if (selectedSale?.id === id) setSelectedSale({ ...selectedSale, status });
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'SALE_STATUS_UPDATE', entityType: 'Sale', entityId: id, details: `Status changed to ${status}`, location: user?.location || 'Lagos' });
+  const handleUpdateSaleStatus = (id: string, status: Sale['status']) => {
+    updateSaleStatus.mutate({ id, status }, {
+      onSuccess: (updated) => {
+        if (selectedSale?.id === id) setSelectedSale(updated);
+        toast.success(`Status changed to ${status}`);
+      },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
-  const updateDeliveryStatus = (id: string, status: DeliveryStatus) => {
-    saveSales.mutate(sales.map((s) => s.id === id ? { ...s, deliveryStatus: status } : s));
-    if (selectedSale?.id === id) setSelectedSale({ ...selectedSale, deliveryStatus: status });
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'DELIVERY_STATUS_UPDATE', entityType: 'Sale', entityId: id, details: `Delivery status changed to ${status}`, location: user?.location || 'Lagos' });
-    toast.success(`Delivery: ${status}`);
+  const handleUpdateDeliveryStatus = (id: string, status: DeliveryStatus) => {
+    updateDeliveryStatusMutation.mutate({ id, delivery_status: status }, {
+      onSuccess: (updated) => {
+        if (selectedSale?.id === id) setSelectedSale(updated);
+        toast.success(`Delivery: ${status}`);
+      },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
   // ── Edit sale ──
@@ -295,44 +304,35 @@ export default function SalesPage() {
     const amount = Number(editForm.amount) || selectedSale.amount;
     const profitMargin = Number(editForm.profitMargin) || selectedSale.profitMargin;
     const profitAmount = (amount * profitMargin) / 100;
-    const updated = { ...selectedSale, ...editForm, amount, profitMargin, profitAmount };
-    saveSales.mutate(sales.map((s) => s.id === selectedSale.id ? updated : s));
-
-    // Update customer totalSpent if amount changed
-    if (amount !== selectedSale.amount) {
-      const diff = amount - selectedSale.amount;
-      saveCustomers.mutate(customers.map((c) => c.id === selectedSale.customerId ? { ...c, totalSpent: c.totalSpent + diff } : c));
-    }
-
-    setSelectedSale(updated);
-    setIsEditing(false);
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'SALE_EDITED', entityType: 'Sale', entityId: selectedSale.id, details: `Sale edited`, location: user?.location || 'Lagos' });
-    toast.success('Sale updated.');
+    updateSale.mutate({
+      id: selectedSale.id,
+      amount,
+      profit_margin: profitMargin,
+      profit_amount: profitAmount,
+      notes: editForm.notes,
+      delivery_address: editForm.deliveryAddress,
+      payment_terms: editForm.paymentTerms,
+      channel: editForm.channel,
+    }, {
+      onSuccess: (updated) => {
+        setSelectedSale(updated);
+        setIsEditing(false);
+        toast.success('Sale updated.');
+      },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
-  // ── Void sale ──
   const handleVoidSale = () => {
     if (!selectedSale) return;
-    saveSales.mutate(sales.map((s) => s.id === selectedSale.id ? { ...s, status: 'Voided' as const } : s));
-    // Reverse customer stats
-    saveCustomers.mutate(customers.map((c) => c.id === selectedSale.customerId ? { ...c, totalOrders: Math.max(0, c.totalOrders - 1), totalSpent: Math.max(0, c.totalSpent - selectedSale.amount) } : c));
-    // Add reversal stock log
-    const returnLog: StockLog = {
-      id: StorageService.generateId(), date: new Date().toISOString().split('T')[0],
-      itemId: '', itemName: selectedSale.productDetails || 'Unknown',
-      type: StockMovementType.RETURN, quantity: 0, uom: '',
-      unitCost: 0, unitPrice: 0, referenceId: selectedSale.id,
-      agentId: user?.id || 'admin', notes: `Voided sale ${selectedSale.id} for ${selectedSale.customerName}`,
-    };
-    saveStockLogs.mutate([returnLog, ...stockLogs]);
-    // Reverse credit if applicable
-    if (selectedSale.isCredit) {
-      saveCredits.mutate(credits.map((cr) => cr.customerId === selectedSale.customerId ? { ...cr, amountOwed: Math.max(0, cr.amountOwed - selectedSale.amount) } : cr));
-    }
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'SALE_VOIDED', entityType: 'Sale', entityId: selectedSale.id, details: `Sale voided: ${fmt(selectedSale.amount)} to ${selectedSale.customerName}`, location: user?.location || 'Lagos' });
-    setSelectedSale({ ...selectedSale, status: 'Voided' });
-    setShowVoidConfirm(false);
-    toast.success('Sale voided.');
+    voidSale.mutate(selectedSale.id, {
+      onSuccess: (updated) => {
+        setSelectedSale(updated);
+        setShowVoidConfirm(false);
+        toast.success('Sale voided.');
+      },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
   // ── CSV Export ──
@@ -387,54 +387,40 @@ export default function SalesPage() {
     e.target.value = '';
   };
 
-  const handleImportConfirm = () => {
+  const handleImportConfirm = async () => {
     setImporting(true);
-    const newSales: Sale[] = csvPreview.map((row) => {
+    let imported = 0;
+    for (const row of csvPreview) {
       const amount = Number(row.amount) || 0;
       const margin = Number(row['margin %'] || row.margin || '20');
       const matchedCustomer = customers.find((c) => c.name.toLowerCase() === (row.customer || '').toLowerCase());
-      const matchedAgent = agents.find((a) => a.name.toLowerCase() === (row.agent || '').toLowerCase());
-      return {
-        id: StorageService.generateId(),
-        customerId: matchedCustomer?.id || 'unknown',
-        customerName: row.customer || 'Unknown',
-        amount,
-        profitMargin: margin,
-        profitAmount: (amount * margin) / 100,
-        date: row.date,
-        agentId: matchedAgent?.id || user?.id || 'admin',
-        agentName: row.agent || matchedAgent?.name || user?.name || 'Admin',
-        status: (row.status as Sale['status']) || 'Paid',
-        productDetails: row.product || row.products || '',
-        isCredit: (row.credit || '').toLowerCase() === 'yes',
-        paymentTerms: (row['payment terms'] || PaymentTerms.COD) as PaymentTerms,
-        notes: row.notes || `Imported from CSV`,
-        channel: (row.channel as SalesChannel) || SalesChannel.WALK_IN,
-        deliveryStatus: (row.delivery as DeliveryStatus) || DeliveryStatus.NOT_APPLICABLE,
-      };
-    });
-
-    // Update customer stats for matched customers
-    const customerUpdates: Record<string, { orders: number; spent: number }> = {};
-    newSales.forEach((s) => {
-      if (s.customerId !== 'unknown') {
-        if (!customerUpdates[s.customerId]) customerUpdates[s.customerId] = { orders: 0, spent: 0 };
-        customerUpdates[s.customerId].orders += 1;
-        customerUpdates[s.customerId].spent += s.amount;
+      if (!matchedCustomer) continue;
+      const isCreditRow = (row.credit || '').toLowerCase() === 'yes';
+      const payment_mode = isCreditRow ? PaymentMode.FULL_CREDIT : PaymentMode.FULL_PAYMENT;
+      const d = new Date(); d.setDate(d.getDate() + 30);
+      try {
+        await createSale.mutateAsync({
+          customer_id: matchedCustomer.id,
+          amount,
+          payment_mode,
+          due_date: isCreditRow ? d.toISOString().split('T')[0] : undefined,
+          profit_margin: margin,
+          profit_amount: (amount * margin) / 100,
+          date: row.date,
+          notes: row.notes || 'Imported from CSV',
+          channel: (row.channel as SalesChannel) || SalesChannel.WALK_IN,
+          delivery_status: (row.delivery as DeliveryStatus) || DeliveryStatus.NOT_APPLICABLE,
+        });
+        imported += 1;
+      } catch {
+        // skip failed rows
       }
-    });
-    if (Object.keys(customerUpdates).length > 0) {
-      saveCustomers.mutate(customers.map((c) => customerUpdates[c.id] ? { ...c, totalOrders: c.totalOrders + customerUpdates[c.id].orders, totalSpent: c.totalSpent + customerUpdates[c.id].spent } : c));
     }
-
-    saveSales.mutate([...newSales, ...sales]);
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'CSV_IMPORT', entityType: 'Sale', entityId: 'bulk', details: `Imported ${newSales.length} historical sales from CSV`, location: user?.location || 'Lagos' });
-
     setImporting(false);
     setShowImportModal(false);
     setCsvPreview([]);
     setCsvErrors([]);
-    toast.success(`Imported ${newSales.length} sales.`);
+    toast.success(`Imported ${imported} sales.`);
   };
 
   // ── Detail panel data ──
@@ -525,7 +511,7 @@ export default function SalesPage() {
           </div>
           <select value={filterAgent} onChange={(e) => setFilterAgent(e.target.value)} className="h-10 rounded-md border px-3 text-sm bg-background"><option value="All">All Agents</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
           <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="h-10 rounded-md border px-3 text-sm bg-background"><option value="All">All Status</option><option>Pending</option><option>Approved</option><option>Paid</option><option>Voided</option></select>
-          <select value={filterHub} onChange={(e) => setFilterHub(e.target.value)} className="h-10 rounded-md border px-3 text-sm bg-background"><option value="All">All Hubs</option>{activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}</select>
+          <HubScopeSelect scope={hubScope} />
           <select value={filterChannel} onChange={(e) => setFilterChannel(e.target.value)} className="h-10 rounded-md border px-3 text-sm bg-background"><option value="All">All Channels</option>{Object.values(SalesChannel).map((c) => <option key={c} value={c}>{c}</option>)}</select>
           {hasFilters && <button onClick={clearFilters} className="h-10 px-3 rounded-md border text-sm font-medium text-muted-foreground hover:bg-accent">Clear</button>}
         </div>
@@ -804,7 +790,7 @@ export default function SalesPage() {
                             return (
                               <div key={step} className="flex-1 flex flex-col items-center">
                                 <button
-                                  onClick={() => selectedSale.status !== 'Voided' && can('sales.update_delivery') && updateDeliveryStatus(selectedSale.id, step)}
+                                  onClick={() => selectedSale.status !== 'Voided' && can('sales.update_delivery') && handleUpdateDeliveryStatus(selectedSale.id, step)}
                                   disabled={selectedSale.status === 'Voided' || !can('sales.update_delivery')}
                                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${isCompleted ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'} ${isCurrent ? 'ring-2 ring-primary/30' : ''} ${selectedSale.status !== 'Voided' && can('sales.update_delivery') ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
                                 >
@@ -851,7 +837,7 @@ export default function SalesPage() {
                           const nextStep = currentIdx < deliverySteps.length - 1 ? deliverySteps[currentIdx + 1] : null;
                           if (!nextStep) return <p className="text-sm text-green-600 font-medium flex items-center gap-2"><Check size={14} /> Delivery confirmed by customer.</p>;
                           return (
-                            <button onClick={() => updateDeliveryStatus(selectedSale.id, nextStep)} className={`${btnPrimary} w-full justify-center h-10`}>
+                            <button onClick={() => handleUpdateDeliveryStatus(selectedSale.id, nextStep)} className={`${btnPrimary} w-full justify-center h-10`}>
                               <ArrowUpRight size={14} className="mr-1.5" /> Advance to: {nextStep}
                             </button>
                           );
@@ -910,9 +896,13 @@ export default function SalesPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className={labelCls}>Hub Location</label>
-                  <select value={selectedHub} onChange={(e) => { setSelectedHub(e.target.value); setSelectedProductId(''); }} className={inputCls}>
-                    {activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
-                  </select>
+                  {hubScope.canSwitchHubs ? (
+                    <select value={selectedHub} onChange={(e) => { setSelectedHub(e.target.value); setSelectedProductId(''); }} className={inputCls}>
+                      {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                    </select>
+                  ) : (
+                    <input type="text" readOnly disabled value={hubScope.hubName} className={`${inputCls} opacity-80 cursor-not-allowed`} />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className={labelCls}>Sales Channel</label>
@@ -958,9 +948,9 @@ export default function SalesPage() {
                     <div><span className="block font-medium text-foreground">{fmt(Math.round(selectedFormCustomer.avgOrder))}</span>avg order</div>
                   </div>
                   {selectedFormCustomer.lastSale && <p className="text-xs text-muted-foreground mt-1">Last purchase: {selectedFormCustomer.lastSale}</p>}
-                  {selectedFormCustomer.credit && selectedFormCustomer.credit.amountOwed > 0 && (
+                  {selectedFormCustomer.credit && selectedFormCustomer.credit.totalOutstanding > 0 && (
                     <div className="mt-2 flex items-center gap-1.5 text-xs text-orange-700 bg-orange-50 p-1.5 rounded">
-                      <AlertTriangle size={12} /> Outstanding credit: {fmt(selectedFormCustomer.credit.amountOwed)} ({selectedFormCustomer.credit.status})
+                      <AlertTriangle size={12} /> Outstanding credit: {fmt(selectedFormCustomer.credit.totalOutstanding)}
                     </div>
                   )}
                 </div>
@@ -1023,9 +1013,8 @@ export default function SalesPage() {
                   {Object.values(PaymentMode).map((mode) => (
                     <button key={mode} type="button" onClick={() => {
                       setPaymentMode(mode);
-                      if (mode === PaymentMode.FULL_PAYMENT) { setAmountPaid(Number(newSale.amount) || 0); setIsCredit(false); }
-                      else if (mode === PaymentMode.FULL_CREDIT) { setAmountPaid(0); setIsCredit(true); }
-                      else { setIsCredit(true); }
+                      if (mode === PaymentMode.FULL_PAYMENT) { setAmountPaid(Number(newSale.amount) || 0); }
+                      else if (mode === PaymentMode.FULL_CREDIT) { setAmountPaid(0); }
                     }} className={`flex-1 py-2 px-3 rounded-md text-xs font-medium border transition-colors ${paymentMode === mode ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
                       {mode}
                     </button>
@@ -1041,6 +1030,19 @@ export default function SalesPage() {
                   {Number(newSale.amount) > 0 && (
                     <p className="text-xs text-orange-600 font-medium">Balance on credit: {fmt(Math.max(0, Number(newSale.amount) - amountPaid))}</p>
                   )}
+                </div>
+              )}
+
+              {(paymentMode === PaymentMode.FULL_CREDIT || paymentMode === PaymentMode.PARTIAL_CREDIT) && (
+                <div className="space-y-2">
+                  <label className={labelCls}>Due Date *</label>
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => { setDueDate(e.target.value); setTouched((t) => ({ ...t, dueDate: true })); }}
+                    className={`${inputCls} ${touched.dueDate && validationErrors.dueDate ? 'border-red-500' : ''}`}
+                  />
+                  {touched.dueDate && validationErrors.dueDate && <p className="text-xs text-red-500">{validationErrors.dueDate}</p>}
                 </div>
               )}
 

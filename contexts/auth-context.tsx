@@ -1,52 +1,50 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Agent, AuthContextType } from '../types';
-import { StorageService } from '../lib/storage-service';
+import { useRouter } from 'next/navigation';
+import { AuthContextType } from '@/types';
+import { useWhoAmI } from '@/hooks/use-queries';
+import { axiosPost } from '@/lib/api';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<Agent | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  const {
+    data: user,
+    isError,
+    refetch,
+  } = useWhoAmI();
 
   useEffect(() => {
-    const storedUserId = localStorage.getItem('fudfarmer_user_id');
-    if (storedUserId) {
-      const agents = StorageService.getAgents();
-      const found = agents.find((a) => a.id === storedUserId);
-      if (found) setUser(found);
-    }
-  }, []);
+    if (user || isError) setLoading(false);
+  }, [user, isError]);
 
-  const login = async (agentId: string, password: string) => {
-    const agents = StorageService.getAgents();
-    const agent = agents.find((a) => a.id === agentId);
-    const actualPassword = agent?.password || 'password';
-
-    if (agent && password === actualPassword) {
-      setUser(agent);
-      localStorage.setItem('fudfarmer_user_id', agent.id);
-      return true;
-    }
-    return false;
+  const login = async (email: string, password: string) => {
+    await axiosPost('auth/login', { email, password }, true);
+    await refetch();
+    router.replace('/');
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('fudfarmer_user_id');
-  };
-
-  const updateProfile = async (updates: Partial<Agent>) => {
-    if (!user) return;
-    const updatedUser = { ...user, ...updates };
-    setUser(updatedUser);
-    const agents = StorageService.getAgents();
-    const updatedAgents = agents.map((a) => (a.id === user.id ? updatedUser : a));
-    StorageService.saveAgents(updatedAgents);
+  const logout = async () => {
+    await axiosPost('auth/logout', {}, true);
+    router.push('/login');
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateProfile, isAuthenticated: !!user }}>
+    <AuthContext.Provider
+      value={{
+        user: user ?? null,
+        login,
+        logout,
+        isAuthenticated: !!user,
+        loading,
+        error: isError,
+        refetch,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

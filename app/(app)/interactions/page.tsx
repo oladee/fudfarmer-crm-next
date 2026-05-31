@@ -4,14 +4,15 @@ import { useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
 import {
-  useFeedback, useSaveFeedback, useEnquiries, useSaveEnquiries,
-  useCompensations, useSaveCompensations, useCustomers,
+  useFeedback, useCreateFeedback, useResolveFeedback, useUpdateFeedbackPriority,
+  useEnquiries, useCreateEnquiry, useResolveEnquiry,
+  useCompensations, useCreateCompensation, useUpdateCompensationStatus,
+  useCustomers,
 } from '@/hooks/use-queries';
-import { StorageService } from '@/lib/storage-service';
 import {
   Feedback, FeedbackType, FeedbackPriority, Sentiment,
   Enquiry, EnquiryCategory,
-  Compensation, CompensationCategory,
+  Compensation, CompensationCategory, Customer,
 } from '@/types';
 import { toast } from 'sonner';
 import {
@@ -48,10 +49,16 @@ const CATEGORY_COLORS: Record<EnquiryCategory, string> = {
   'Other': 'bg-slate-100 text-slate-800',
 };
 
+const HAS_API = Boolean(process.env.NEXT_PUBLIC_API_URL);
+
 function calcResolutionDays(dateStr: string, resolvedStr: string): number {
   const d1 = new Date(dateStr);
   const d2 = new Date(resolvedStr);
   return Math.max(0, Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)));
+}
+
+function findCustomerByName(name: string, customers: Customer[]): Customer | undefined {
+  return customers.find((c) => c.name.toLowerCase() === name.trim().toLowerCase());
 }
 
 export default function InteractionsPage() {
@@ -61,9 +68,13 @@ export default function InteractionsPage() {
   const { data: enquiries = [] } = useEnquiries();
   const { data: compensations = [] } = useCompensations();
   const { data: customers = [] } = useCustomers();
-  const saveFeedback = useSaveFeedback();
-  const saveEnquiries = useSaveEnquiries();
-  const saveCompensations = useSaveCompensations();
+  const createFeedback = useCreateFeedback();
+  const resolveFeedback = useResolveFeedback();
+  const updateFeedbackPriority = useUpdateFeedbackPriority();
+  const createEnquiry = useCreateEnquiry();
+  const resolveEnquiry = useResolveEnquiry();
+  const createCompensation = useCreateCompensation();
+  const updateCompensationStatus = useUpdateCompensationStatus();
 
   // --- Shared state ---
   const [activeTab, setActiveTab] = useState<MainTab>('feedback');
@@ -144,29 +155,35 @@ export default function InteractionsPage() {
   }, [feedbacks, customers]);
 
   // ============ Feedback Handlers ============
-  const handleSubmitFeedback = (e: React.FormEvent) => {
+  const handleSubmitFeedback = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFbContent || !newFbCustomer) { toast.error('Customer name and content are required.'); return; }
-    const cust = customers.find((c) => c.name.toLowerCase() === newFbCustomer.toLowerCase());
-    const fb: Feedback = {
-      id: StorageService.generateId(), customerId: cust?.id || '0', customerName: newFbCustomer,
-      type: newFbType, content: newFbContent, date: new Date().toISOString().split('T')[0],
-      status: 'Open', sentiment: Sentiment.NEUTRAL, priority: newFbPriority,
-    };
-    saveFeedback.mutate([fb, ...feedbacks]);
-    setNewFbContent(''); setNewFbCustomer(''); setNewFbPriority(FeedbackPriority.MEDIUM); setShowFeedbackModal(false);
-    toast.success('Feedback recorded.');
+    const cust = findCustomerByName(newFbCustomer, customers);
+    if (HAS_API && !cust) { toast.error('Select a customer from the list (must exist in CRM).'); return; }
+    try {
+      await createFeedback.mutateAsync({
+        customerId: cust?.id || '0',
+        customerName: cust?.name || newFbCustomer,
+        type: newFbType,
+        content: newFbContent,
+        priority: newFbPriority,
+      });
+      setNewFbContent(''); setNewFbCustomer(''); setNewFbPriority(FeedbackPriority.MEDIUM); setShowFeedbackModal(false);
+      toast.success('Feedback recorded.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to record feedback.');
+    }
   };
 
-  const handleResolveFeedback = () => {
+  const handleResolveFeedback = async () => {
     if (!selectedFeedback || !resolutionNote) return;
-    saveFeedback.mutate(feedbacks.map((f) => f.id === selectedFeedback.id ? {
-      ...f, status: 'Resolved' as const, resolutionNote,
-      resolvedDate: new Date().toISOString().split('T')[0],
-      resolvedByAgentId: user?.id, resolvedByAgentName: user?.name,
-    } : f));
-    setSelectedFeedback(null); setResolutionNote('');
-    toast.success('Feedback resolved.');
+    try {
+      await resolveFeedback.mutateAsync({ id: selectedFeedback.id, resolution: resolutionNote });
+      setSelectedFeedback(null); setResolutionNote('');
+      toast.success('Feedback resolved.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to resolve feedback.');
+    }
   };
 
   const getSentimentIcon = (sentiment?: Sentiment) => {
@@ -184,27 +201,33 @@ export default function InteractionsPage() {
   }), [feedbacks, fbFilterStatus, fbFilterType, fbFilterPriority, searchTerm]);
 
   // ============ Enquiry Handlers ============
-  const handleSaveEnquiry = () => {
+  const handleSaveEnquiry = async () => {
     if (!newEnquiry.customerName || !newEnquiry.message) { toast.error('Customer name and message are required.'); return; }
-    const enquiry: Enquiry = {
-      id: StorageService.generateId(), customerName: newEnquiry.customerName!,
-      email: newEnquiry.email || '', subject: newEnquiry.subject || 'General Enquiry',
-      message: newEnquiry.message!, date: newEnquiry.date || new Date().toISOString().split('T')[0],
-      status: 'Open', category: newEnquiry.category as EnquiryCategory || 'Other',
-    };
-    saveEnquiries.mutate([enquiry, ...enquiries]);
-    setShowEnquiryModal(false); setNewEnquiry({ date: new Date().toISOString().split('T')[0], category: 'Other' });
-    toast.success('Enquiry recorded.');
+    try {
+      await createEnquiry.mutateAsync({
+        customerName: newEnquiry.customerName!,
+        email: newEnquiry.email,
+        subject: newEnquiry.subject,
+        message: newEnquiry.message!,
+        date: newEnquiry.date,
+        category: (newEnquiry.category as EnquiryCategory) || 'Other',
+      });
+      setShowEnquiryModal(false); setNewEnquiry({ date: new Date().toISOString().split('T')[0], category: 'Other' });
+      toast.success('Enquiry recorded.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to record enquiry.');
+    }
   };
 
-  const handleResolveEnquiry = () => {
+  const handleResolveEnquiry = async () => {
     if (!selectedEnquiry || !enqResolution) return;
-    saveEnquiries.mutate(enquiries.map((e) => e.id === selectedEnquiry.id ? {
-      ...e, status: 'Closed' as const, resolution: enqResolution,
-      managedByAgentId: user?.id, managedByAgentName: user?.name,
-    } : e));
-    setSelectedEnquiry(null); setEnqResolution('');
-    toast.success('Enquiry closed.');
+    try {
+      await resolveEnquiry.mutateAsync({ id: selectedEnquiry.id, resolution: enqResolution });
+      setSelectedEnquiry(null); setEnqResolution('');
+      toast.success('Enquiry closed.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to close enquiry.');
+    }
   };
 
   const filteredEnquiries = useMemo(() => enquiries.filter((enq) => {
@@ -216,36 +239,50 @@ export default function InteractionsPage() {
   }), [enquiries, enqFilterStatus, searchTerm]);
 
   // ============ Compensation Handlers ============
-  const handleSaveComp = () => {
+  const handleSaveComp = async () => {
     if (!newComp.customerName || !newComp.amount) { toast.error('Customer name and amount are required.'); return; }
-    const cust = customers.find((c) => c.name.toLowerCase() === newComp.customerName!.toLowerCase());
-    const item: Compensation = {
-      id: StorageService.generateId(), customerId: cust?.id || '0', customerName: newComp.customerName!,
-      reason: newComp.reason || '', amount: Number(newComp.amount),
-      date: new Date().toISOString().split('T')[0], status: newComp.status as Compensation['status'],
-      category: newComp.category as CompensationCategory,
-      recordedByAgentId: user?.id, recordedByAgentName: user?.name,
-    };
-    saveCompensations.mutate([item, ...compensations]);
-    setShowCompModal(false); setNewComp({ status: 'Pending', category: CompensationCategory.PRODUCT });
-    toast.success('Compensation recorded.');
+    const cust = findCustomerByName(newComp.customerName!, customers);
+    if (HAS_API && !cust) { toast.error('Select a customer from the list (must exist in CRM).'); return; }
+    try {
+      await createCompensation.mutateAsync({
+        customerId: cust?.id || '0',
+        customerName: cust?.name || newComp.customerName!,
+        reason: newComp.reason || '',
+        amount: Number(newComp.amount),
+        status: (newComp.status as Compensation['status']) || 'Pending',
+        category: (newComp.category as CompensationCategory) || CompensationCategory.PRODUCT,
+        recordedByAgentId: user?.id,
+        recordedByAgentName: user?.name,
+      });
+      setShowCompModal(false); setNewComp({ status: 'Pending', category: CompensationCategory.PRODUCT });
+      toast.success('Compensation recorded.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to record compensation.');
+    }
   };
 
-  const handleSaveCompFromFeedback = () => {
+  const handleSaveCompFromFeedback = async () => {
     if (!compFromFbData.amount || !compFromFbData.customerName) return;
-    const cust = customers.find((c) => c.name.toLowerCase() === compFromFbData.customerName!.toLowerCase());
-    const item: Compensation = {
-      id: StorageService.generateId(), customerId: cust?.id || compFromFbData.customerId || '0',
-      customerName: compFromFbData.customerName!, reason: compFromFbData.reason || '',
-      amount: Number(compFromFbData.amount), date: new Date().toISOString().split('T')[0],
-      status: compFromFbData.status as Compensation['status'],
-      category: compFromFbData.category as CompensationCategory,
-      recordedByAgentId: user?.id, recordedByAgentName: user?.name,
-    };
-    saveCompensations.mutate([item, ...compensations]);
-    setShowCompFromFeedback(false);
-    setResolutionNote((prev) => prev ? `${prev}\n[Compensation] \u20A6${item.amount.toLocaleString()} (${item.category}) issued.` : `[Compensation] \u20A6${item.amount.toLocaleString()} (${item.category}) issued.`);
-    toast.success('Compensation issued.');
+    const cust = findCustomerByName(compFromFbData.customerName!, customers)
+      ?? (compFromFbData.customerId ? customers.find((c) => c.id === compFromFbData.customerId) : undefined);
+    if (HAS_API && !cust) { toast.error('Customer not found in CRM.'); return; }
+    try {
+      const item = await createCompensation.mutateAsync({
+        customerId: cust?.id || compFromFbData.customerId || '0',
+        customerName: cust?.name || compFromFbData.customerName!,
+        reason: compFromFbData.reason || '',
+        amount: Number(compFromFbData.amount),
+        status: (compFromFbData.status as Compensation['status']) || 'Pending',
+        category: (compFromFbData.category as CompensationCategory) || CompensationCategory.PRODUCT,
+        recordedByAgentId: user?.id,
+        recordedByAgentName: user?.name,
+      });
+      setShowCompFromFeedback(false);
+      setResolutionNote((prev) => prev ? `${prev}\n[Compensation] \u20A6${item.amount.toLocaleString()} (${item.category}) issued.` : `[Compensation] \u20A6${item.amount.toLocaleString()} (${item.category}) issued.`);
+      toast.success('Compensation issued.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to issue compensation.');
+    }
   };
 
   const filteredCompensations = useMemo(() => compensations.filter((c) => {
@@ -259,44 +296,56 @@ export default function InteractionsPage() {
   };
 
   // ============ Quick Action Handlers ============
-  const handleEscalatePriority = (fbId: string) => {
+  const handleEscalatePriority = async (fbId: string) => {
     const priorityOrder: FeedbackPriority[] = [FeedbackPriority.LOW, FeedbackPriority.MEDIUM, FeedbackPriority.HIGH, FeedbackPriority.URGENT];
-    saveFeedback.mutate(feedbacks.map((f) => {
-      if (f.id !== fbId) return f;
-      const currentIdx = priorityOrder.indexOf(f.priority || FeedbackPriority.MEDIUM);
-      const nextPriority = currentIdx < priorityOrder.length - 1 ? priorityOrder[currentIdx + 1] : f.priority;
-      if (nextPriority === f.priority) { toast.info('Already at highest priority.'); return f; }
-      return { ...f, priority: nextPriority };
-    }));
-    setOpenActionId(null);
-    toast.success('Priority escalated.');
+    const fb = feedbacks.find((f) => f.id === fbId);
+    if (!fb) return;
+    const currentIdx = priorityOrder.indexOf(fb.priority || FeedbackPriority.MEDIUM);
+    const nextPriority = currentIdx < priorityOrder.length - 1 ? priorityOrder[currentIdx + 1] : fb.priority;
+    if (nextPriority === fb.priority) {
+      toast.info('Already at highest priority.');
+      setOpenActionId(null);
+      return;
+    }
+    try {
+      await updateFeedbackPriority.mutateAsync({ id: fbId, priority: nextPriority! });
+      setOpenActionId(null);
+      toast.success('Priority escalated.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to escalate priority.');
+    }
   };
 
-  const handleQuickResolve = (fbId: string) => {
+  const handleQuickResolve = async (fbId: string) => {
     if (!quickResolveNote.trim()) { toast.error('Resolution note is required.'); return; }
-    saveFeedback.mutate(feedbacks.map((f) => f.id === fbId ? {
-      ...f, status: 'Resolved' as const, resolutionNote: quickResolveNote,
-      resolvedDate: new Date().toISOString().split('T')[0],
-      resolvedByAgentId: user?.id, resolvedByAgentName: user?.name,
-    } : f));
-    setQuickResolveId(null); setQuickResolveNote('');
-    toast.success('Feedback resolved.');
+    try {
+      await resolveFeedback.mutateAsync({ id: fbId, resolution: quickResolveNote });
+      setQuickResolveId(null); setQuickResolveNote('');
+      toast.success('Feedback resolved.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to resolve feedback.');
+    }
   };
 
-  const handleQuickClose = (enqId: string) => {
+  const handleQuickClose = async (enqId: string) => {
     if (!quickCloseNote.trim()) { toast.error('Resolution note is required.'); return; }
-    saveEnquiries.mutate(enquiries.map((e) => e.id === enqId ? {
-      ...e, status: 'Closed' as const, resolution: quickCloseNote,
-      managedByAgentId: user?.id, managedByAgentName: user?.name,
-    } : e));
-    setQuickCloseId(null); setQuickCloseNote('');
-    toast.success('Enquiry closed.');
+    try {
+      await resolveEnquiry.mutateAsync({ id: enqId, resolution: quickCloseNote });
+      setQuickCloseId(null); setQuickCloseNote('');
+      toast.success('Enquiry closed.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to close enquiry.');
+    }
   };
 
-  const handleCompStatusChange = (compId: string, newStatus: Compensation['status']) => {
-    saveCompensations.mutate(compensations.map((c) => c.id === compId ? { ...c, status: newStatus } : c));
-    setOpenActionId(null);
-    toast.success(`Compensation marked as ${newStatus}.`);
+  const handleCompStatusChange = async (compId: string, newStatus: Compensation['status']) => {
+    try {
+      await updateCompensationStatus.mutateAsync({ id: compId, status: newStatus });
+      setOpenActionId(null);
+      toast.success(`Compensation marked as ${newStatus}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update compensation.');
+    }
   };
 
   // ============ Add button handler ============

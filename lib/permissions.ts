@@ -1,6 +1,6 @@
 import { Agent } from '../types';
+import { AppUser } from '@/types/api';
 
-// ── All granular permissions in the system ──
 export const ALL_PERMISSIONS = [
   'dashboard.view',
   'analytics.view',
@@ -36,7 +36,6 @@ export const ALL_PERMISSIONS = [
 
 export type Permission = (typeof ALL_PERMISSIONS)[number];
 
-// ── Grouped for the UI ──
 export interface PermissionGroup {
   label: string;
   icon: string;
@@ -130,7 +129,40 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   },
 ];
 
-// ── Default permission sets per role ──
+export const PERMISSION_MAP: Record<Permission, string> = {
+  'dashboard.view': 'view_dashboard',
+  'analytics.view': 'view_analytics',
+  'inventory.view': 'view_inventory',
+  'inventory.create': 'create_sku',
+  'inventory.edit': 'edit_product_detail',
+  'inventory.adjust_stock': 'adjust_stock',
+  'inventory.transfer': 'transfer_btw_hubs',
+  'inventory.import': 'import_csv',
+  'inventory.export': 'export_csv',
+  'customers.view': 'view_customers',
+  'customers.create': 'add_customer',
+  'customers.edit': 'edit_customer',
+  'sales.view': 'view_sales',
+  'sales.create': 'create_sales',
+  'sales.edit': 'edit_sales',
+  'sales.void': 'void_sales',
+  'sales.update_status': 'update_payment_status',
+  'sales.update_delivery': 'update_delivery_status',
+  'sales.import': 'import_sales_csv',
+  'credits.view': 'view_credit',
+  'credits.record_payment': 'record_payment',
+  'credits.set_due_date': 'set_due_date',
+  'interactions.view': 'view_interactions',
+  'interactions.create': 'log_interaction',
+  'interactions.resolve': 'resolve_interaction',
+  'audit.view': 'view_audit_trail',
+  'settings.manage_users': 'manage_users',
+  'settings.manage_hubs': 'manage_hubs',
+  'settings.manage_roles': 'manage_roles',
+  'settings.reset_data': 'manage_users',
+};
+
+// ── Settings → Roles tab defaults (API reset only; not persisted in localStorage) ──
 export type RoleName = Agent['role'];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, Permission[]> = {
@@ -164,39 +196,13 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleName, Permission[]> = {
   ],
 };
 
-// ── Storage helpers ──
-const ROLE_PERMISSIONS_KEY = 'fudfarmer_role_permissions';
-
-export function getRolePermissions(): Record<RoleName, Permission[]> {
-  if (typeof window === 'undefined') return DEFAULT_ROLE_PERMISSIONS;
-  try {
-    const stored = localStorage.getItem(ROLE_PERMISSIONS_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored) as Record<string, string[]>;
-      // Merge with defaults — ensure every role exists
-      const result: Record<string, Permission[]> = {};
-      for (const role of Object.keys(DEFAULT_ROLE_PERMISSIONS)) {
-        result[role] = (parsed[role] as Permission[]) ?? DEFAULT_ROLE_PERMISSIONS[role as RoleName];
-      }
-      return result as Record<RoleName, Permission[]>;
-    }
-  } catch { /* noop */ }
-  return DEFAULT_ROLE_PERMISSIONS;
-}
-
-export function saveRolePermissions(perms: Record<RoleName, Permission[]>): void {
-  localStorage.setItem(ROLE_PERMISSIONS_KEY, JSON.stringify(perms));
-}
-
-// ── Permission checker ──
-export function hasPermission(user: Agent | null, permission: Permission): boolean {
+export function hasPermission(user: AppUser | null, permission: Permission): boolean {
   if (!user) return false;
-  const rolePerms = getRolePermissions();
-  const perms = rolePerms[user.role];
-  if (!perms) return false;
-  return perms.includes(permission);
+  const backendKey = PERMISSION_MAP[permission];
+  if (!backendKey) return false;
+  return user.permissions.includes(backendKey);
 }
 
-export function hasAnyPermission(user: Agent | null, permissions: Permission[]): boolean {
+export function hasAnyPermission(user: AppUser | null, permissions: Permission[]): boolean {
   return permissions.some((p) => hasPermission(user, p));
 }

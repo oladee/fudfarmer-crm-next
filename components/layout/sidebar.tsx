@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
-import { useInventory, useFeedback, useEnquiries, useCredits } from '@/hooks/use-queries';
+import { useInventory, useFeedback, useEnquiries, useCreditSummary } from '@/hooks/use-queries';
 import { Permission } from '@/lib/permissions';
 import {
   LayoutDashboard, Package, Users, Target, Banknote,
@@ -31,7 +31,7 @@ export function Sidebar() {
   const { data: inventory } = useInventory();
   const { data: feedback } = useFeedback();
   const { data: enquiries } = useEnquiries();
-  const { data: credits } = useCredits();
+  const { data: creditSummary = [] } = useCreditSummary();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const lowStockCount = useMemo(() => {
@@ -50,9 +50,8 @@ export function Sidebar() {
   }, [enquiries]);
 
   const overdueCreditsCount = useMemo(() => {
-    if (!credits) return 0;
-    return credits.filter((c) => c.status === 'Overdue').length;
-  }, [credits]);
+    return creditSummary.reduce((sum, row) => sum + row.overdueCount, 0);
+  }, [creditSummary]);
 
   const content = (
     <div className="flex h-full flex-col bg-sidebar border-r border-sidebar-border">
@@ -129,7 +128,7 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[13px] font-medium truncate text-sidebar-foreground">{user.name}</p>
-              <p className="text-[10px] text-muted-foreground">{user.role} &middot; {user.location}</p>
+              <p className="text-[10px] text-muted-foreground">{user.role} &middot; {user.hubName ?? 'All Hubs'}</p>
             </div>
             <button
               onClick={logout}

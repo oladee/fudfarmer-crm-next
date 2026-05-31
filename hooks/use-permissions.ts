@@ -9,7 +9,7 @@ export function usePermissions() {
   return {
     can: (permission: Permission) => hasPermission(user, permission),
     canAny: (permissions: Permission[]) => hasAnyPermission(user, permissions),
-    isAdmin: user?.role === 'Company Admin',
+    isAdmin: user?.roleName === 'company_admin',
     user,
   };
 }

@@ -9,12 +9,13 @@
 2. [New API Types (`types/api.ts`)](#2-new-api-types-typesapits)
 3. [AuthContext Rewrite](#3-authcontext-rewrite)
 4. [Permissions Rewrite](#4-permissions-rewrite)
-5. [Login Page Rewrite](#5-login-page-rewrite)
-6. [Hooks Rewrite (`hooks/use-queries.ts`)](#6-hooks-rewrite-hooksuse-queriests)
-7. [Next.js Middleware](#7-nextjs-middleware)
-8. [Per-Page API Wiring](#8-per-page-api-wiring)
-9. [Files to Delete / Clean Up](#9-files-to-delete--clean-up)
-10. [Implementation Order](#10-implementation-order)
+5. [Data Visibility & Hub Scoping (UI)](#5-data-visibility--hub-scoping-ui)
+6. [Login Page Rewrite](#6-login-page-rewrite)
+7. [Hooks Rewrite (`hooks/use-queries.ts`)](#7-hooks-rewrite-hooksuse-queriests)
+8. [Next.js Middleware](#8-nextjs-middleware)
+9. [Per-Page API Wiring](#9-per-page-api-wiring)
+10. [Files to Delete / Clean Up](#10-files-to-delete--clean-up)
+11. [Implementation Order](#11-implementation-order)
 
 ---
 
@@ -31,6 +32,27 @@
 | `middleware.ts` | New | Cookie-based route protection for `/(app)/**` |
 | `types/api.ts` | New | TypeScript types matching backend API response shapes |
 | `lib/storage-service.ts` | Deprecate | No longer used after hooks rewrite |
+| Data visibility UI | New | Hub badge, scope-aware filters; trust backend scoping |
+
+### Credit UX Model (key design decision)
+
+| Layer | What the user sees |
+|-------|-------------------|
+| Credits main page | KPI metrics + **customer-grouped table** with aggregated outstanding balance |
+| Customer drill-down | List of **per-sale credit items** with linked sale info |
+| Credit item detail | Repayment history + **extension trail** per item |
+| Sale creation | `due_date` required when `payment_mode` is not Full Payment; no `is_credit` toggle |
+| Credit creation | Automatic from sales only — never manual from credits page |
+
+### Data visibility (key design decision)
+
+| Role (`data_scope`) | What the user sees in the app |
+|---------------------|------------------------------|
+| `company_admin` (`all`) | All hubs; hub switcher shows "All Hubs" + individual hubs |
+| `hub_manager`, `finance` (`hub`) | Single hub only; no hub switcher; all agents' data in that hub |
+| Agent roles (`assigned`) | Single hub; only customers assigned to them (+ records they created) |
+
+**Settings (Users / Hubs / Roles tabs) is not data-scoped** — users with `settings.manage_*` permissions manage global config. Hub managers with `manage_users` may only create users assigned to their own hub.
 
 ---
 
@@ -45,25 +67,27 @@ export interface ApiUser {
   full_name: string;
   email: string;
   phone: string;
-  location: string;
   is_active: boolean;
+  hub: { _id: string; name: string } | null; // null for company_admin
+  data_scope: 'all' | 'hub' | 'assigned';
   role: {
-    label: string; // e.g. "Hub Manager"
-    name: string;  // e.g. "hub_manager"
+    label: string;
+    name: string;
   };
-  permissions: string[]; // e.g. ["view_inventory", "create_sku", ...]
+  permissions: string[];
 }
 
-// The shape used throughout the app (mapped from ApiUser)
 export interface AppUser {
-  id: string;           // mapped from _id
-  name: string;         // mapped from full_name
+  id: string;
+  name: string;
   email: string;
   phone: string;
-  location: string;
   is_active: boolean;
-  role: string;         // the role label e.g. "Hub Manager"
-  roleName: string;     // the role slug e.g. "hub_manager"
+  hubId: string | null;
+  hubName: string | null;
+  dataScope: 'all' | 'hub' | 'assigned';
+  role: string;
+  roleName: string;
   permissions: string[];
 }
 
@@ -80,6 +104,61 @@ export interface PaginatedResponse<T> {
   totalPages: number;
   data: T[];
 }
+
+/** Customer-grouped row for credits main page — GET /credits/summary */
+export interface CreditCustomerSummary {
+  customer_id: string;
+  customer_name: string;
+  total_outstanding: number;
+  open_credit_count: number;
+  overdue_count: number;
+  oldest_due_date: string | null;
+}
+
+/** Per-sale credit item — GET /credits?customer_id=... */
+export interface CreditRecord {
+  id: string;
+  customer_id: string;
+  customer_name: string;
+  sale: {
+    id: string;
+    date: string;
+    amount: number;
+    payment_mode: string;
+    product_details?: string;
+  };
+  original_amount: number;
+  amount_owed: number;
+  date_issued: string;
+  due_date: string;
+  last_payment_date?: string;
+  status: 'Pending' | 'Overdue' | 'Clear' | 'Voided';
+  payment_terms?: string;
+  extension_count: number;
+  flagged?: boolean;
+  flag_reason?: string;
+  payments: CreditPayment[];
+  due_date_extensions: DueDateExtension[];
+}
+
+export interface CreditPayment {
+  id: string;
+  date: string;
+  amount: number;
+  method?: string;
+  recorded_by_name?: string;
+  note?: string;
+  reference_id?: string;
+  balance_after: number;
+}
+
+export interface DueDateExtension {
+  previous_due_date: string;
+  new_due_date: string;
+  extended_at: string;
+  extended_by_name: string;
+  reason?: string;
+}
 ```
 
 **Mapping helper** (add to `lib/utils.ts`):
@@ -92,8 +171,10 @@ export function mapApiUser(u: ApiUser): AppUser {
     name:        u.full_name,
     email:       u.email,
     phone:       u.phone,
-    location:    u.location,
     is_active:   u.is_active,
+    hubId:       u.hub?._id ?? null,
+    hubName:     u.hub?.name ?? null,
+    dataScope:   u.data_scope,
     role:        u.role.label,
     roleName:    u.role.name,
     permissions: u.permissions,
@@ -303,13 +384,88 @@ export function usePermissions() {
 }
 ```
 
-### 4.3 Sidebar — no changes needed
+### 4.3 Sidebar — permission tabs only
 
-`sidebar.tsx` already calls `can(item.permission)` which flows through `usePermissions → hasPermission`. Once auth is real, sidebar tabs will auto-hide/show based on actual role permissions.
+`sidebar.tsx` already calls `can(item.permission)` for tab visibility. Update the user footer block:
+
+```tsx
+<p className="text-[10px] text-muted-foreground">
+  {user.role} &middot; {user.hubName ?? 'All Hubs'}
+</p>
+```
+
+Replace `user.location` with `user.hubName`. Tabs remain permission-driven; **data scope is enforced by the API**, not by hiding tabs.
 
 ---
 
-## 5. Login Page Rewrite
+## 5. Data Visibility & Hub Scoping (UI)
+
+**Principle:** The frontend reflects scope for UX (labels, filters, form defaults) but **never relies on client-side filtering alone**. All list endpoints return pre-scoped data from the backend.
+
+### 5.1 `useDataScope` hook — `hooks/use-data-scope.ts`
+
+```typescript
+'use client';
+
+import { useAuth } from '@/contexts/auth-context';
+
+export function useDataScope() {
+  const { user } = useAuth();
+  return {
+    dataScope: user?.dataScope ?? 'assigned',
+    hubId: user?.hubId ?? null,
+    hubName: user?.hubName ?? null,
+    isGlobal: user?.dataScope === 'all',       // company_admin
+    isHubScoped: user?.dataScope === 'hub',    // hub_manager, finance
+    isAssignedScoped: user?.dataScope === 'assigned',
+    canSwitchHubs: user?.dataScope === 'all',
+  };
+}
+```
+
+### 5.2 Hub switcher behaviour (Inventory, Customers location filter, Sales, Dashboard)
+
+| `dataScope` | Hub switcher | Default filter |
+|-------------|--------------|----------------|
+| `all` | Show "All Hubs" + each active hub | User selection persisted in local state |
+| `hub` | Hidden — show read-only hub badge | Fixed to `user.hubId` |
+| `assigned` | Hidden — show read-only hub badge | Fixed to `user.hubId` |
+
+**Do not send `hub_id` query param** for non-global users — backend forces scope. For `company_admin`, optional `hub_id` param filters the view.
+
+### 5.3 Forms — create / assign defaults
+
+| Form | `company_admin` | `hub_manager` | Agent (`assigned`) |
+|------|-----------------|---------------|---------------------|
+| **Create customer** | Pick hub + assign any agent in that hub | Hub locked to own; assign any agent in hub | Hub locked; `assigned_agent` defaults to self |
+| **Create sale** | Pick customer (any hub) | Customers in hub only | Assigned customers only |
+| **Create user (Settings)** | Pick any hub + role | Hub locked to own; cannot create `company_admin` | N/A unless has `manage_users` |
+| **Create SKU** | Pick hub | Hub locked to own | Hub locked to own |
+
+Agent dropdowns in customer/sale forms:
+- `hub_manager`: list agents where `user.hub_id = current hub`
+- `assigned`: hide agent picker on create customer (self assigned); on edit, hub_manager only can reassign
+
+### 5.4 Pages — scope notes
+
+| Page | UI adjustment |
+|------|---------------|
+| **Dashboard** | Metrics auto-scoped by API; no client-side aggregation across hubs for non-admin |
+| **Inventory** | Hide hub tabs for non-admin; show `{hubName}` badge in header |
+| **Customers** | Location filter becomes read-only hub badge for non-admin; list is assignment-scoped for agents |
+| **Sales** | Customer picker filtered by API; agents only see their sales + assigned customers' sales |
+| **Credits** | Summary + drill-down scoped by API; agents see only assigned customers' credits |
+| **Interactions** | Same customer-linked scoping |
+| **Audit** | Hub-scoped; agents may see only their own actions |
+| **Settings** | **Not scoped** for roles/hubs CRUD; Users tab lists scoped by API (hub_manager sees own hub's users only) |
+
+### 5.5 Empty states
+
+When an agent has no assigned customers, show guided empty state: *"No customers assigned to you yet. Contact your hub manager."* — not a permission error.
+
+---
+
+## 6. Login Page Rewrite
 
 **File:** `app/login/page.tsx`
 
@@ -427,9 +583,11 @@ export default function LoginPage() {
 
 ---
 
-## 6. Hooks Rewrite (`hooks/use-queries.ts`)
+## 7. Hooks Rewrite (`hooks/use-queries.ts`)
 
 All hooks replace `StorageService.*` with API calls. Use `withCredentials: true` on all authenticated requests.
+
+**Data scope:** Do not append `hub_id` to query strings for non–`company_admin` users — the backend applies scope from the JWT session user. Only pass `hub_id` when `user.dataScope === 'all'` and the user has selected a hub filter in the UI.
 
 **Base pattern:**
 ```typescript
@@ -451,14 +609,14 @@ export function useCreateHub() {
 }
 ```
 
-### 6.1 Auth
+### 7.1 Auth
 
 ```typescript
 // GET /auth/whoami
 export function useWhoAmI() { ... } // see §3.2
 ```
 
-### 6.2 Hubs
+### 7.2 Hubs
 
 ```typescript
 export function useHubs()          // GET /hub
@@ -467,7 +625,7 @@ export function useUpdateHub()     // PATCH /hub/:id
 export function useDeleteHub()     // DELETE /hub/:id
 ```
 
-### 6.3 Customers
+### 7.3 Customers
 
 ```typescript
 export function useCustomers()       // GET /customers  (query: hub_id?, segment?, search?, type?)
@@ -478,18 +636,51 @@ export function useCreateSegment()   // POST /customers/segments
 export function useDeleteSegment()   // DELETE /customers/segments/:id
 ```
 
-### 6.4 Sales
+### 7.4 Sales
 
 ```typescript
-export function useSales()                // GET /sales  (query: status?, date_from?, date_to?, is_credit?)
-export function useCreateSale()           // POST /sales
+export function useSales()                // GET /sales  (query: status?, date_from?, date_to?, payment_mode?)
+export function useCreateSale()           // POST /sales — see sale form rules below
 export function useUpdateSale()           // PATCH /sales/:id
 export function useUpdateSaleStatus()     // PATCH /sales/:id/status
 export function useUpdateDeliveryStatus() // PATCH /sales/:id/delivery
 export function useVoidSale()             // PATCH /sales/:id/void
 ```
 
-### 6.5 Inventory
+**Sale creation form rules (FE + BE aligned):**
+
+| Field | When required |
+|-------|---------------|
+| `payment_mode` | Always |
+| `amount_paid` | When `payment_mode === 'Partial Credit'` |
+| `due_date` | When `payment_mode === 'Full Credit'` or `'Partial Credit'` |
+
+- Remove any `is_credit` checkbox/toggle from the sales form — credit is inferred from `payment_mode`
+- When user selects `Full Credit` or `Partial Credit`, show a **Due Date** date-picker (required before submit)
+- On successful `POST /sales`, if response includes `credit_record`, show toast: *"Sale recorded — credit of ₦X created, due {date}"*
+- Do **not** create credits manually from the credits page
+
+**Create sale payload shape:**
+```typescript
+interface CreateSaleDto {
+  customer_id: string;
+  amount: number;
+  amount_paid?: number;       // required for Partial Credit
+  payment_mode: 'Full Payment' | 'Full Credit' | 'Partial Credit';
+  payment_type?: 'Cash' | 'Transfer' | 'POS';
+  due_date?: string;          // required when payment_mode !== 'Full Payment' (ISO date)
+  payment_terms?: string;
+  channel?: string;
+  delivery_status?: string;
+  delivery_address?: string;
+  notes?: string;
+  items?: { product_id: string; quantity: number; unit_price: number }[];
+}
+```
+
+---
+
+### 7.5 Inventory
 
 ```typescript
 export function useInventory()          // GET /inventory  (query: hub_id?, category?, low_stock?, search?)
@@ -501,17 +692,58 @@ export function useTransferStock()      // POST /inventory/transfer
 export function useBatchStockUpdate()   // POST /inventory/batch
 ```
 
-### 6.6 Credits
+### 7.6 Credits
 
 ```typescript
-export function useCredits()         // GET /credits  (query: status?, customer_id?, flagged?)
-export function useCreditRecord(id)  // GET /credits/:id
-export function useRecordPayment()   // POST /credits/:id/payment
-export function useSetDueDate()      // PATCH /credits/:id/due-date
-export function useFlagCredit()      // PATCH /credits/:id/flag
+export function useCreditSummary(filters?)                  // GET /credits/summary — customer-grouped list for main page
+export function useCustomerCredits(customerId, filters?)    // GET /credits?customer_id=... — per-sale items
+export function useCreditRecord(id)                       // GET /credits/:id — full detail with payments + extensions
+export function useRecordPayment()                          // POST /credits/:id/payment
+export function useExtendDueDate()                          // PATCH /credits/:id/extend-due-date
+export function useFlagCredit()                             // PATCH /credits/:id/flag
 ```
 
-### 6.7 Interactions — Feedback
+**Credits page UX model** — two-level navigation:
+
+```
+/credits (main)
+├── KPI metrics row (total outstanding, overdue count, customers with credit, avg days overdue)
+└── Customer table (from useCreditSummary)
+    ├── customer_name
+    ├── total_outstanding (aggregated)
+    ├── open_credit_count
+    ├── overdue_count
+    └── oldest_due_date
+         │
+         └── click row → Customer credit drawer/panel
+              ├── Customer header + aggregated balance
+              └── Per-sale credit items (from useCustomerCredits)
+                   ├── linked sale (date, amount, payment_mode, product summary)
+                   ├── original_amount / amount_owed / due_date / status
+                   ├── extension_count badge
+                   ├── Repayment history (payments[] for this item)
+                   ├── Extension trail (due_date_extensions[] for this item)
+                   └── Actions (per credit item):
+                        • Record payment  → can('credits.record_payment')
+                        • Extend due date   → can('credits.set_due_date') — modal with new date + reason
+                        • Flag / unflag
+```
+
+**Extend due date modal:**
+- Fields: `new_due_date` (must be after current `due_date`), `reason` (optional but encouraged)
+- On success: invalidate `useCustomerCredits`, `useCreditRecord`, `useCreditSummary`
+- Display `extension_count` on each credit row; show full trail in expanded/detail view
+
+**Remove from credits main page:**
+- Flat single-row-per-customer credit model
+- Any client-side credit creation
+
+**Update `types.ts` (domain):**
+- Remove `isCredit?: boolean` from `Sale` — derive credit badge from `payment_mode !== 'Full Payment'`
+- Replace customer-level `CreditRecord` with per-sale model matching `types/api.ts`
+- Remove `saleIds?: string[]` — each credit links to one `sale.id`
+
+### 7.7 Interactions — Feedback
 
 ```typescript
 export function useFeedback()        // GET /feedbacks
@@ -519,7 +751,7 @@ export function useCreateFeedback()  // POST /feedbacks
 export function useResolveFeedback() // PATCH /feedbacks/:id/resolve
 ```
 
-### 6.8 Interactions — Enquiries
+### 7.8 Interactions — Enquiries
 
 ```typescript
 export function useEnquiries()        // GET /enquiries
@@ -527,7 +759,7 @@ export function useCreateEnquiry()    // POST /enquiries
 export function useResolveEnquiry()   // PATCH /enquiries/:id/resolve
 ```
 
-### 6.9 Interactions — Compensations
+### 7.9 Interactions — Compensations
 
 ```typescript
 export function useCompensations()              // GET /compensations
@@ -535,13 +767,13 @@ export function useCreateCompensation()         // POST /compensations
 export function useUpdateCompensationStatus()   // PATCH /compensations/:id/status
 ```
 
-### 6.10 Audit Trail
+### 7.10 Audit Trail
 
 ```typescript
 export function useAuditLogs(filters?)  // GET /audit-trail  (query: entity_type?, user_id?, date_from?, date_to?, search?, page?, limit?)
 ```
 
-### 6.11 Users (Agents)
+### 7.11 Users (Agents)
 
 ```typescript
 export function useAgents(query?)    // GET /users  (query: search?, role_id?, status?)
@@ -550,7 +782,7 @@ export function useUpdateAgent()     // PATCH /users/:id
 export function useDeleteAgent()     // DELETE /users/:id
 ```
 
-### 6.12 Roles
+### 7.12 Roles
 
 ```typescript
 export function useRoles()        // GET /roles
@@ -559,7 +791,7 @@ export function useUpdateRole()   // PATCH /roles/:id
 export function useDeleteRole()   // DELETE /roles/:id
 ```
 
-### 6.13 Tasks
+### 7.13 Tasks
 
 ```typescript
 export function useTasks(filters?)  // GET /tasks  (query: assigned_to?, status?)
@@ -568,7 +800,7 @@ export function useUpdateTask()     // PATCH /tasks/:id
 export function useDeleteTask()     // DELETE /tasks/:id
 ```
 
-### 6.14 Dashboard
+### 7.14 Dashboard
 
 ```typescript
 export function useDashboardMetrics()  // GET /dashboard/metrics
@@ -576,7 +808,7 @@ export function useDashboardMetrics()  // GET /dashboard/metrics
 
 ---
 
-## 7. Next.js Middleware
+## 8. Next.js Middleware
 
 **File:** `middleware.ts` (project root, alongside `next.config.ts`)
 
@@ -615,7 +847,7 @@ Once middleware is in place, the client-side redirect in `app/(app)/layout.tsx` 
 
 ---
 
-## 8. Per-Page API Wiring
+## 9. Per-Page API Wiring
 
 ### Dashboard (`app/(app)/page.tsx`)
 - Replace all `useCustomers`, `useSales`, etc. with data from `useDashboardMetrics()`
@@ -626,25 +858,48 @@ Once middleware is in place, the client-side redirect in `app/(app)/layout.tsx` 
 - `useSales()` — sales trend data
 - `useInventory()` — product performance
 - `useCustomers()` — customer insights (total, repeat, B2B/B2C)
-- `useCredits()` — credit & risk tab
+- `useCredits()` — credit & risk tab: use `useCreditSummary()` for aggregates; drill into `useCustomerCredits(customerId)` for per-sale overdue analysis
 
 ### Inventory (`app/(app)/inventory/page.tsx`)
-- `useInventory()`, `useStockLogs()`, `useHubs()`
+- `useInventory()`, `useStockLogs()`, `useHubs()` (hub list only for `company_admin`)
+- `useDataScope()` — hide hub switcher unless `canSwitchHubs`; show read-only `{hubName}` badge otherwise
 - Mutations: `useCreateProduct()`, `useUpdateProduct()`, `useRecordStockMove()`, `useTransferStock()`, `useBatchStockUpdate()`
+- New SKU form: pre-fill hub from `user.hubId` for non-admin; lock field as read-only
 - Remove all `StorageService.*` and `StorageService.addAuditLog()` calls (audit is written server-side)
 
 ### Customers (`app/(app)/customers/page.tsx`)
-- `useCustomers()`, `useSegments()`, `useHubs()`, `useAgents()`
-- Customer detail panel: data for credits/sales/interactions comes from existing records joined client-side by `customer_id` (keep as-is; data comes from same queries)
+- `useCustomers()`, `useSegments()`, `useHubs()`, `useAgents()` — lists auto-scoped by API
+- `useDataScope()` — location/hub filter read-only for non-admin; agent sees only assigned customers
+- Add customer form: hub locked for non-admin; agent dropdown scoped to hub (hub_manager) or hidden (agent, defaults to self)
+- Customer detail panel: credits via `useCustomerCredits(selectedCustomer.id)`
 - Mutations: `useCreateCustomer()`, `useUpdateCustomer()`, `useCreateSegment()`
 
 ### Sales (`app/(app)/sales/page.tsx`)
 - `useSales()`, `useCustomers()`, `useInventory()`, `useHubs()`
+- Customer picker populated from scoped `useCustomers()` — agents only see assigned customers
 - Mutations: `useCreateSale()`, `useUpdateSale()`, `useUpdateSaleStatus()`, `useUpdateDeliveryStatus()`, `useVoidSale()`
+- **Record sale form:** required `due_date` when not Full Payment; hide `is_credit`
+- Sale detail: link to credit record when `payment_mode !== 'Full Payment'`
 
 ### Credits (`app/(app)/credits/page.tsx`)
-- `useCredits()`, `useCustomers()`
-- Mutations: `useRecordPayment()`, `useSetDueDate()`, `useFlagCredit()`
+
+**Main view (default):**
+- `useCreditSummary()` — drives KPI cards + customer-grouped table
+- KPIs: total outstanding across all customers, overdue credit items count, customers with open credit, total flagged
+- Table columns: Customer, Total Outstanding, Open Credits, Overdue, Oldest Due Date
+- Click customer row → open customer credit panel (drawer or slide-over)
+
+**Customer credit panel:**
+- `useCustomerCredits(customerId)` — list of per-sale credit items
+- Each item shows: sale date/ref, sale amount, credit original/owed, due date, status, extension count
+- Expand item or open sub-panel for:
+  - **Repayment history** — `payments[]` timeline
+  - **Extension trail** — `due_date_extensions[]` with who/when/reason
+- Actions per item: Record Payment, Extend Due Date (with reason), Flag
+
+**Mutations:** `useRecordPayment()`, `useExtendDueDate()`, `useFlagCredit()`
+
+**Customers page credit tab:** update to fetch `useCustomerCredits(selectedCustomer.id)` instead of a single customer credit record; show list of credit items linked to sales
 
 ### Interactions (`app/(app)/interactions/page.tsx`)
 - `useFeedback()`, `useEnquiries()`, `useCompensations()`, `useCustomers()`
@@ -655,16 +910,15 @@ Once middleware is in place, the client-side redirect in `app/(app)/layout.tsx` 
 - Remove `StorageService.getAuditLogs()`
 
 ### Settings (`app/(app)/settings/page.tsx`)
-- **Profile tab:** `useAuth().user` for display; `axiosPost('auth/reset-password', ...)` for password change
-- **Users tab:** `useAgents()`, `useRoles()`; mutations: `useCreateAgent()`, `useUpdateAgent()`, `useDeleteAgent()`
-- **Hubs tab:** `useHubs()`; mutations: `useCreateHub()`, `useUpdateHub()`, `useDeleteHub()`
-- **Roles & Permissions tab:** `useRoles()`; mutations: `useCreateRole()`, `useUpdateRole()`, `useDeleteRole()`
-  - Role permission editor: bind checkboxes to `PERMISSION_GROUPS` (from `lib/permissions.ts`); map using `PERMISSION_MAP` when building the DTO for the API
-- **Data tab:** Remove `StorageService` reset functionality entirely (or hide behind admin flag)
+- **Not hub-scoped for Roles/Hubs admin** — global config as documented in backend §5.6
+- **Profile tab:** `useAuth().user` (show `hubName`, `role`); `axiosPost('auth/reset-password', ...)`
+- **Users tab:** `useAgents()`, `useRoles()`; create user form includes `hub_id` (required for non-admin roles; hub_manager: hub locked to own)
+- **Hubs tab:** `useHubs()` — full hub list for `company_admin`; hub_manager may see own hub only (API-scoped)
+- **Roles & Permissions tab:** `useRoles()` — unaffected by operational data scope
 
 ---
 
-## 9. Files to Delete / Clean Up
+## 10. Files to Delete / Clean Up
 
 | File | Action | Reason |
 |------|--------|--------|
@@ -674,7 +928,7 @@ Once middleware is in place, the client-side redirect in `app/(app)/layout.tsx` 
 
 ---
 
-## 10. Implementation Order
+## 11. Implementation Order
 
 ```
 Phase 1 — Types & API Foundation
@@ -689,16 +943,18 @@ Phase 2 — Auth Layer
   2d. Add middleware.ts
   2e. Delete contexts/AuthContext.tsx
 
-Phase 3 — Permissions
+Phase 3 — Permissions & Data Scope UI
   3a. Rewrite lib/permissions.ts (add PERMISSION_MAP, remove localStorage)
-  3b. Verify hooks/use-permissions.ts works with new AppUser type (no code change expected)
+  3b. Add hooks/use-data-scope.ts
+  3c. Update sidebar user footer (hubName); hub switcher gating on inventory/customers/sales pages
+  3d. Update create forms (customer, sale, user, SKU) with hub/assignment defaults
 
 Phase 4 — Hooks (work in dependency order)
   4a. useHubs, useAgents, useRoles  (referenced by most pages)
   4b. useCustomers, useSegments
   4c. useInventory, useStockLogs
-  4d. useSales
-  4e. useCredits
+  4d. useSales (with due_date validation in create form)
+  4e. useCreditSummary, useCustomerCredits, useCreditRecord, useExtendDueDate
   4f. useFeedback, useEnquiries, useCompensations
   4g. useAuditLogs, useTasks, useDashboardMetrics
 

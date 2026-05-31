@@ -2,9 +2,13 @@
 
 import { useState, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { useHubScopeFilter } from '@/hooks/use-hub-scope';
+import { HubScopeFilterBar } from '@/components/hub-scope-filter';
 import { usePermissions } from '@/hooks/use-permissions';
-import { useInventory, useSaveInventory, useStockLogs, useSaveStockLogs, useHubs } from '@/hooks/use-queries';
-import { StorageService } from '@/lib/storage-service';
+import {
+  useInventory, useCreateProduct, useUpdateProduct, useStockLogs,
+  useRecordStockMove, useTransferStock, useBatchStockUpdate, useHubs,
+} from '@/hooks/use-queries';
 import { InventoryItem, StockLog, StockMovementType } from '@/types';
 import { toast } from 'sonner';
 import {
@@ -150,18 +154,21 @@ function getUniqueSuppliers(logs: StockLog[]): string[] {
 export default function InventoryPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
+  const hubScope = useHubScopeFilter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { data: items = [] } = useInventory();
-  const { data: logs = [] } = useStockLogs();
-  const saveInventory = useSaveInventory();
-  const saveStockLogs = useSaveStockLogs();
+  const { data: items = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
+  const { data: logs = [] } = useStockLogs({ hub_id: hubScope.hubIdForApi });
+  const createProduct = useCreateProduct();
+  const updateProduct = useUpdateProduct();
+  const recordStockMove = useRecordStockMove();
+  const transferStock = useTransferStock();
+  const batchStockUpdate = useBatchStockUpdate();
   const { data: hubs = [] } = useHubs();
   const activeHubs = hubs.filter(h => h.isActive);
 
   // View state
   const [activeView, setActiveView] = useState<'Products' | 'Ledger'>('Products');
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterHub, setFilterHub] = useState<string>('All');
   const [filterLowStock, setFilterLowStock] = useState(false);
   const [filterCategory, setFilterCategory] = useState<ProductCategory | 'All'>('All');
 
@@ -222,7 +229,7 @@ export default function InventoryPage() {
   const [newProduct, setNewProduct] = useState<Partial<InventoryItem>>({
     sku: '', name: '', category: 'Fish', unitOfMeasure: 'Cartons',
     minStockLevel: 5, currentStock: 0, avgUnitCost: 0, baseSellingPrice: 0,
-    location: user?.location || activeHubs[0]?.name || 'Lagos',
+    location: hubScope.defaultHubName || activeHubs[0]?.name || 'Lagos',
   });
 
   // Edit product
@@ -233,11 +240,11 @@ export default function InventoryPage() {
   const filteredItems = useMemo(() => items.filter((i) => {
     const matchesSearch = i.name.toLowerCase().includes(searchTerm.toLowerCase()) || i.sku.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesLowStock = filterLowStock ? i.currentStock <= i.minStockLevel : true;
-    const matchesHub = filterHub === 'All' || i.location === filterHub;
+    const matchesHub = hubScope.matchesHub(i.location);
     const matchesCategory = filterCategory === 'All' || i.category === filterCategory;
     const matchesActive = i.isActive !== false;
     return matchesSearch && matchesLowStock && matchesHub && matchesCategory && matchesActive;
-  }), [items, searchTerm, filterLowStock, filterHub, filterCategory]);
+  }), [items, searchTerm, filterLowStock, hubScope, filterCategory]);
 
   const inventoryValue = useMemo(() => filteredItems.reduce((acc, curr) => acc + curr.currentStock * curr.avgUnitCost, 0), [filteredItems]);
   const retailValue = useMemo(() => filteredItems.reduce((acc, curr) => acc + curr.currentStock * curr.baseSellingPrice, 0), [filteredItems]);
@@ -250,7 +257,7 @@ export default function InventoryPage() {
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [filteredItems]);
-  const lowStockItems = useMemo(() => items.filter((i) => i.currentStock <= i.minStockLevel && i.isActive !== false && (filterHub === 'All' || i.location === filterHub)), [items, filterHub]);
+  const lowStockItems = useMemo(() => items.filter((i) => i.currentStock <= i.minStockLevel && i.isActive !== false && hubScope.matchesHub(i.location)), [items, hubScope]);
 
   // Expiring soon count
   const expiringSoonCount = useMemo(() => {
@@ -259,7 +266,7 @@ export default function InventoryPage() {
     const seen = new Set<string>();
     for (const item of items) {
       if (item.isActive === false) continue;
-      if (filterHub !== 'All' && item.location !== filterHub) continue;
+      if (!hubScope.matchesHub(item.location)) continue;
       const batches = buildFifoBatches(logs, item.id);
       for (const batch of batches) {
         if (batch.expiryDate) {
@@ -272,14 +279,15 @@ export default function InventoryPage() {
       }
     }
     return seen.size;
-  }, [items, logs, filterHub]);
+  }, [items, logs, hubScope]);
 
   // Ledger filtered logs
   const filteredLogs = useMemo(() => {
     let filtered = [...logs];
-    if (filterHub !== 'All') {
-      const hubItemIds = new Set(items.filter((i) => i.location === filterHub).map((i) => i.id));
-      filtered = filtered.filter((l) => hubItemIds.has(l.itemId) || l.fromLocation === filterHub || l.toLocation === filterHub);
+    if (hubScope.filterHub !== 'All') {
+      const hub = hubScope.filterHub;
+      const hubItemIds = new Set(items.filter((i) => i.location === hub).map((i) => i.id));
+      filtered = filtered.filter((l) => hubItemIds.has(l.itemId) || l.fromLocation === hub || l.toLocation === hub);
     }
     if (ledgerDateFrom) filtered = filtered.filter((l) => l.date >= ledgerDateFrom);
     if (ledgerDateTo) filtered = filtered.filter((l) => l.date <= ledgerDateTo);
@@ -289,7 +297,7 @@ export default function InventoryPage() {
       filtered = filtered.filter((l) => l.itemName.toLowerCase().includes(q) || (l.notes || '').toLowerCase().includes(q) || (l.batchNumber || '').toLowerCase().includes(q));
     }
     return filtered;
-  }, [logs, items, filterHub, ledgerDateFrom, ledgerDateTo, ledgerTypeFilter, ledgerSearch]);
+  }, [logs, items, hubScope, ledgerDateFrom, ledgerDateTo, ledgerTypeFilter, ledgerSearch]);
 
   // Ledger summary stats
   const ledgerStats = useMemo(() => {
@@ -370,46 +378,36 @@ export default function InventoryPage() {
       toast.error('Please fill in SKU and Name.');
       return;
     }
-    // Duplicate SKU check
     const existingSku = items.find((i) => i.sku.toLowerCase() === newProduct.sku!.toLowerCase());
     if (existingSku) {
       toast.error(`Duplicate SKU — "${newProduct.sku}" already exists (${existingSku.name}).`);
       return;
     }
-    const item: InventoryItem = {
-      id: StorageService.generateId(),
+    const hub = activeHubs.find((h) => h.name === (newProduct.location || user?.location || activeHubs[0]?.name));
+    createProduct.mutate({
       sku: newProduct.sku!,
       name: newProduct.name!,
-      category: newProduct.category as ProductCategory,
-      unitOfMeasure: newProduct.unitOfMeasure as InventoryItem['unitOfMeasure'],
-      minStockLevel: newProduct.minStockLevel || 5,
-      currentStock: newProduct.currentStock || 0,
-      avgUnitCost: newProduct.avgUnitCost || 0,
-      baseSellingPrice: newProduct.baseSellingPrice || 0,
-      cartonPrice: newProduct.cartonPrice,
-      cartonWeight: newProduct.cartonWeight,
-      lastStockUpdate: new Date().toISOString().split('T')[0],
-      location: newProduct.location || user?.location || activeHubs[0]?.name || 'Lagos',
-      isActive: true,
-      priceVersion: new Date().toISOString().split('T')[0],
-      priceHistory: newProduct.avgUnitCost || newProduct.baseSellingPrice
-        ? [{ date: new Date().toISOString().split('T')[0], cost: newProduct.avgUnitCost || 0, price: newProduct.baseSellingPrice || 0 }]
-        : [],
-    };
-    saveInventory.mutate([...items, item]);
-    StorageService.addAuditLog({
-      userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'CREATE_SKU',
-      entityType: 'Inventory', entityId: item.id,
-      details: `Created SKU ${item.sku} (${item.name}) with initial stock ${item.currentStock} in ${item.location}`,
-      location: item.location,
+      category: newProduct.category,
+      unit_of_measure: newProduct.unitOfMeasure,
+      min_stock_level: newProduct.minStockLevel || 5,
+      current_stock: newProduct.currentStock || 0,
+      avg_unit_cost: newProduct.avgUnitCost || 0,
+      base_selling_price: newProduct.baseSellingPrice || 0,
+      carton_price: newProduct.cartonPrice,
+      carton_weight: newProduct.cartonWeight,
+      hub_id: hub?.id,
+    }, {
+      onSuccess: () => {
+        setShowAddProductModal(false);
+        setNewProduct({
+          sku: '', name: '', category: 'Fish', unitOfMeasure: 'Cartons',
+          minStockLevel: 5, currentStock: 0, avgUnitCost: 0, baseSellingPrice: 0,
+          location: user?.location || activeHubs[0]?.name || 'Lagos',
+        });
+        toast.success('Product created successfully.');
+      },
+      onError: (err) => toast.error(err.message),
     });
-    setShowAddProductModal(false);
-    setNewProduct({
-      sku: '', name: '', category: 'Fish', unitOfMeasure: 'Cartons',
-      minStockLevel: 5, currentStock: 0, avgUnitCost: 0, baseSellingPrice: 0,
-      location: user?.location || activeHubs[0]?.name || 'Lagos',
-    });
-    toast.success('Product created successfully.');
   };
 
   /* ──────── EDIT SKU ──────── */
@@ -419,248 +417,126 @@ export default function InventoryPage() {
     const original = items.find((i) => i.id === editProduct.id);
     if (!original) return;
 
-    const priceChanged = original.avgUnitCost !== editProduct.avgUnitCost || original.baseSellingPrice !== editProduct.baseSellingPrice;
-    const today = new Date().toISOString().split('T')[0];
-
-    // Margin warning (non-blocking)
     if (editProduct.avgUnitCost && editProduct.baseSellingPrice && editProduct.avgUnitCost > editProduct.baseSellingPrice) {
       toast.warning('Warning: Cost exceeds selling price — negative margin!');
     }
 
-    const updatedPriceHistory = priceChanged
-      ? [...(original.priceHistory || []), { date: today, cost: editProduct.avgUnitCost || original.avgUnitCost, price: editProduct.baseSellingPrice || original.baseSellingPrice }]
-      : original.priceHistory || [];
-
-    const updatedItems = items.map((i) => {
-      if (i.id === editProduct.id) {
-        return {
-          ...i,
-          name: editProduct.name || i.name,
-          category: (editProduct.category as ProductCategory) || i.category,
-          unitOfMeasure: (editProduct.unitOfMeasure as InventoryItem['unitOfMeasure']) || i.unitOfMeasure,
-          minStockLevel: editProduct.minStockLevel ?? i.minStockLevel,
-          baseSellingPrice: editProduct.baseSellingPrice ?? i.baseSellingPrice,
-          avgUnitCost: editProduct.avgUnitCost ?? i.avgUnitCost,
-          cartonPrice: editProduct.cartonPrice,
-          cartonWeight: editProduct.cartonWeight,
-          location: editProduct.location || i.location,
-          priceVersion: priceChanged ? today : i.priceVersion,
-          priceHistory: updatedPriceHistory,
-        };
-      }
-      return i;
+    updateProduct.mutate({
+      id: editProduct.id,
+      name: editProduct.name,
+      category: editProduct.category,
+      unit_of_measure: editProduct.unitOfMeasure,
+      min_stock_level: editProduct.minStockLevel,
+      base_selling_price: editProduct.baseSellingPrice,
+      avg_unit_cost: editProduct.avgUnitCost,
+      carton_price: editProduct.cartonPrice,
+      carton_weight: editProduct.cartonWeight,
+    }, {
+      onSuccess: (updated) => {
+        if (viewingDetailsItem?.id === editProduct.id) setViewingDetailsItem(updated);
+        setShowEditModal(false);
+        setEditProduct({});
+        toast.success('Product updated successfully.');
+      },
+      onError: (err) => toast.error(err.message),
     });
-
-    saveInventory.mutate(updatedItems);
-    StorageService.addAuditLog({
-      userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'EDIT_SKU',
-      entityType: 'Inventory', entityId: editProduct.id,
-      details: `Edited SKU ${original.sku}${priceChanged ? ' (price changed)' : ''}`,
-      location: editProduct.location || original.location,
-    });
-
-    // Update detail panel if viewing this item
-    if (viewingDetailsItem?.id === editProduct.id) {
-      const updated = updatedItems.find((i) => i.id === editProduct.id);
-      if (updated) setViewingDetailsItem(updated);
-    }
-
-    setShowEditModal(false);
-    setEditProduct({});
-    toast.success('Product updated successfully.');
   };
 
   /* ──────── STOCK MOVEMENT ──────── */
 
   const handleStockMove = () => {
     if (!selectedProduct) return;
-    const date = new Date().toISOString().split('T')[0];
     const isReduction = [StockMovementType.SALE, StockMovementType.TRANSFER].includes(moveData.type);
     const absQty = Math.abs(moveData.quantity);
 
-    // Stock validation for outbound movements
     if (isReduction && selectedProduct.currentStock < absQty) {
       toast.error(`Insufficient stock — only ${selectedProduct.currentStock} ${selectedProduct.unitOfMeasure} available.`);
       return;
     }
 
-    // FIFO cost calculation for sales
     let unitCostForLog = moveData.unitCost || selectedProduct.avgUnitCost;
     if (moveData.type === StockMovementType.SALE) {
       const fifoCost = getFifoCostForSale(logs, selectedProduct.id, absQty);
       if (fifoCost.avgCost > 0) unitCostForLog = Math.round(fifoCost.avgCost);
     }
 
-    const quantity = isReduction ? -absQty : absQty;
+    const closeModal = () => {
+      setShowStockMoveModal(false);
+      setSelectedProduct(null);
+      setMoveData({ type: StockMovementType.PURCHASE, quantity: 1, unitCost: 0, unitPrice: 0, notes: '', batchNumber: '', expiryDate: '', supplier: '', toLocation: '', reason: '' });
+    };
 
     if (moveData.type === StockMovementType.TRANSFER) {
-      // ── INTER-HUB TRANSFER ──
       if (!moveData.toLocation || moveData.toLocation === selectedProduct.location) {
         toast.error('Please select a different destination hub for transfer.');
         return;
       }
-      const destLocation = moveData.toLocation;
-
-      // Source log (negative)
-      const sourceLog: StockLog = {
-        id: StorageService.generateId(), date, itemId: selectedProduct.id, itemName: selectedProduct.name,
-        type: StockMovementType.TRANSFER, quantity: -absQty, uom: selectedProduct.unitOfMeasure,
-        unitCost: selectedProduct.avgUnitCost, unitPrice: selectedProduct.baseSellingPrice,
-        agentId: user?.id || 'admin', notes: moveData.notes || `Transfer to ${destLocation}`,
-        fromLocation: selectedProduct.location, toLocation: destLocation,
-        batchNumber: moveData.batchNumber || undefined, reason: moveData.reason || undefined,
-      };
-
-      // Find or create destination item
-      let destItem = items.find((i) => i.sku === selectedProduct.sku && i.location === destLocation && i.isActive !== false);
-      let updatedItems = [...items];
-      let destItemId: string;
-
-      if (!destItem) {
-        // Auto-create item at destination
-        const newDestItem: InventoryItem = {
-          ...selectedProduct,
-          id: StorageService.generateId(),
-          currentStock: 0,
-          location: destLocation,
-          lastStockUpdate: date,
-          isActive: true,
-        };
-        updatedItems.push(newDestItem);
-        destItemId = newDestItem.id;
-      } else {
-        destItemId = destItem.id;
+      const fromHub = activeHubs.find((h) => h.name === selectedProduct.location);
+      const toHub = activeHubs.find((h) => h.name === moveData.toLocation);
+      if (!fromHub || !toHub) {
+        toast.error('Could not resolve hub IDs for transfer.');
+        return;
       }
-
-      // Destination log (positive)
-      const destLog: StockLog = {
-        id: StorageService.generateId(), date, itemId: destItemId,
-        itemName: selectedProduct.name, type: StockMovementType.TRANSFER,
-        quantity: absQty, uom: selectedProduct.unitOfMeasure,
-        unitCost: selectedProduct.avgUnitCost, unitPrice: selectedProduct.baseSellingPrice,
-        agentId: user?.id || 'admin', notes: moveData.notes || `Transfer from ${selectedProduct.location}`,
-        fromLocation: selectedProduct.location, toLocation: destLocation,
-        batchNumber: moveData.batchNumber || undefined, reason: moveData.reason || undefined,
-        expiryDate: moveData.expiryDate || undefined,
-      };
-
-      // Update stock levels
-      updatedItems = updatedItems.map((i) => {
-        if (i.id === selectedProduct.id) {
-          return { ...i, currentStock: i.currentStock - absQty, lastStockUpdate: date };
-        }
-        if (i.id === destItemId) {
-          return { ...i, currentStock: i.currentStock + absQty, lastStockUpdate: date };
-        }
-        return i;
+      transferStock.mutate({
+        item_id: selectedProduct.id,
+        quantity: absQty,
+        from_hub_id: fromHub.id,
+        to_hub_id: toHub.id,
+        notes: moveData.notes || `Transfer to ${moveData.toLocation}`,
+      }, {
+        onSuccess: () => { toast.success(`Transferred ${absQty} ${selectedProduct.unitOfMeasure} to ${moveData.toLocation}.`); closeModal(); },
+        onError: (err) => toast.error(err.message),
       });
-
-      saveStockLogs.mutate([sourceLog, destLog, ...logs]);
-      saveInventory.mutate(updatedItems);
-
-      StorageService.addAuditLog({
-        userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'STOCK_TRANSFER',
-        entityType: 'Inventory', entityId: selectedProduct.id,
-        details: `Transferred ${absQty} ${selectedProduct.unitOfMeasure} of ${selectedProduct.sku} from ${selectedProduct.location} to ${destLocation}`,
-        location: selectedProduct.location,
-      });
-
-      toast.success(`Transferred ${absQty} ${selectedProduct.unitOfMeasure} to ${destLocation}.`);
-    } else {
-      // ── PURCHASE / SALE / ADJUSTMENT / RETURN ──
-      const log: StockLog = {
-        id: StorageService.generateId(), date, itemId: selectedProduct.id, itemName: selectedProduct.name,
-        type: moveData.type, quantity, uom: selectedProduct.unitOfMeasure,
-        unitCost: moveData.type === StockMovementType.SALE ? unitCostForLog : (moveData.unitCost || selectedProduct.avgUnitCost),
-        unitPrice: moveData.unitPrice || selectedProduct.baseSellingPrice,
-        agentId: user?.id || 'admin', notes: moveData.notes,
-        batchNumber: moveData.batchNumber || undefined,
-        expiryDate: moveData.expiryDate || undefined,
-        supplier: moveData.supplier || undefined,
-        reason: moveData.reason || undefined,
-      };
-
-      saveStockLogs.mutate([log, ...logs]);
-
-      const updatedItems = items.map((i) => {
-        if (i.id === selectedProduct.id) {
-          let newAvgCost = i.avgUnitCost;
-          if (moveData.type === StockMovementType.PURCHASE && moveData.unitCost && i.currentStock + quantity > 0) {
-            newAvgCost = Math.round((i.currentStock * i.avgUnitCost + absQty * moveData.unitCost) / (i.currentStock + absQty));
-          }
-          return {
-            ...i,
-            currentStock: i.currentStock + quantity,
-            avgUnitCost: newAvgCost,
-            lastStockUpdate: date,
-            supplier: moveData.type === StockMovementType.PURCHASE && moveData.supplier ? moveData.supplier : i.supplier,
-            lastPurchasePrice: moveData.type === StockMovementType.PURCHASE && moveData.unitCost ? moveData.unitCost : i.lastPurchasePrice,
-          };
-        }
-        return i;
-      });
-      saveInventory.mutate(updatedItems);
-
-      StorageService.addAuditLog({
-        userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'STOCK_UPDATE',
-        entityType: 'Inventory', entityId: selectedProduct.id,
-        details: `${moveData.type}: ${quantity > 0 ? '+' : ''}${quantity} ${selectedProduct.unitOfMeasure} for ${selectedProduct.sku}${moveData.supplier ? ` from ${moveData.supplier}` : ''}${moveData.batchNumber ? ` (Batch: ${moveData.batchNumber})` : ''}`,
-        location: selectedProduct.location,
-      });
-
-      toast.success('Stock updated.');
+      return;
     }
 
-    setShowStockMoveModal(false);
-    setSelectedProduct(null);
-    setMoveData({ type: StockMovementType.PURCHASE, quantity: 1, unitCost: 0, unitPrice: 0, notes: '', batchNumber: '', expiryDate: '', supplier: '', toLocation: '', reason: '' });
+    const quantity = isReduction ? -absQty : absQty;
+    recordStockMove.mutate({
+      item_id: selectedProduct.id,
+      type: moveData.type,
+      quantity,
+      unit_cost: moveData.type === StockMovementType.SALE ? unitCostForLog : (moveData.unitCost || selectedProduct.avgUnitCost),
+      unit_price: moveData.unitPrice || selectedProduct.baseSellingPrice,
+      notes: moveData.notes,
+      batch_number: moveData.batchNumber || undefined,
+      expiry_date: moveData.expiryDate || undefined,
+      supplier: moveData.supplier || undefined,
+      reason: moveData.reason || undefined,
+    }, {
+      onSuccess: () => { toast.success('Stock updated.'); closeModal(); },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
   /* ──────── BATCH UPDATE ──────── */
 
   const handleBatchUpdate = () => {
-    const date = new Date().toISOString().split('T')[0];
-    let updatedItems = [...items];
-    const newLogs: StockLog[] = [];
+    const updates = Object.entries(batchData.updates)
+      .filter(([, data]) => data.quantity !== 0)
+      .map(([itemId, data]) => ({
+        item_id: itemId,
+        quantity: data.quantity,
+        unit_cost: data.cost,
+      }));
 
-    Object.entries(batchData.updates).forEach(([itemId, data]) => {
-      const item = updatedItems.find((i) => i.id === itemId);
-      if (!item || data.quantity === 0) return;
-      const isReduction = [StockMovementType.SALE, StockMovementType.TRANSFER].includes(batchData.type);
-      const absQty = Math.abs(data.quantity);
-
-      // Stock validation for outbound
-      if (isReduction && item.currentStock < absQty) {
-        toast.error(`Insufficient stock for ${item.name} — only ${item.currentStock} available. Skipped.`);
-        return;
-      }
-
-      const quantity = isReduction ? -absQty : absQty;
-      newLogs.push({
-        id: StorageService.generateId(), date, itemId, itemName: item.name, type: batchData.type,
-        quantity, uom: item.unitOfMeasure, unitCost: data.cost || item.avgUnitCost,
-        unitPrice: item.baseSellingPrice, agentId: user?.id || 'admin', notes: batchData.notes || 'Batch Update',
-      });
-      updatedItems = updatedItems.map((i) => {
-        if (i.id === itemId) {
-          let newAvgCost = i.avgUnitCost;
-          if (batchData.type === StockMovementType.PURCHASE && data.cost && i.currentStock + quantity > 0) {
-            newAvgCost = Math.round((i.currentStock * i.avgUnitCost + absQty * data.cost) / (i.currentStock + absQty));
-          }
-          return { ...i, currentStock: i.currentStock + quantity, avgUnitCost: newAvgCost, lastStockUpdate: date };
-        }
-        return i;
-      });
-    });
-
-    if (newLogs.length > 0) {
-      saveInventory.mutate(updatedItems);
-      saveStockLogs.mutate([...newLogs, ...logs]);
+    if (updates.length === 0) {
+      toast.error('No valid batch updates selected.');
+      return;
     }
-    setShowBatchModal(false);
-    setSelectedIds(new Set());
-    setIsSelectionMode(false);
-    toast.success('Batch update complete.');
+
+    batchStockUpdate.mutate({
+      type: batchData.type,
+      notes: batchData.notes || 'Batch Update',
+      updates,
+    }, {
+      onSuccess: () => {
+        setShowBatchModal(false);
+        setSelectedIds(new Set());
+        setIsSelectionMode(false);
+        toast.success('Batch update complete.');
+      },
+      onError: (err) => toast.error(err.message),
+    });
   };
 
   /* ──────── CSV UPLOAD ──────── */
@@ -798,26 +674,14 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* ── Hub Switcher ── */}
-      <div className="flex flex-wrap items-center gap-1.5 bg-muted/20 p-1 rounded-lg border w-fit">
-        {(['All', ...activeHubs.map(h => h.name)]).map((hub) => (
-          <button
-            key={hub}
-            onClick={() => setFilterHub(hub)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${filterHub === hub ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:bg-background/50'}`}
-          >
-            {hub === 'All' ? <Layers size={12} /> : <MapPin size={12} />}
-            {hub === 'All' ? 'All Hubs' : hub}
-          </button>
-        ))}
-      </div>
+      <HubScopeFilterBar scope={hubScope} />
 
       {/* ── Alerts ── */}
       {lowStockItems.length > 0 && activeView === 'Products' && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex flex-col md:flex-row items-center gap-3">
           <AlertCircle size={18} className="text-red-600 shrink-0" />
           <div className="flex-1 text-sm">
-            <h4 className="font-semibold text-red-900">Inventory Alert: {lowStockItems.length} items critically low{filterHub !== 'All' ? ` in ${filterHub}` : ''}!</h4>
+            <h4 className="font-semibold text-red-900">Inventory Alert: {lowStockItems.length} items critically low{hubScope.filterHub !== 'All' ? ` in ${hubScope.filterHub}` : ''}!</h4>
             <p className="text-red-700 text-xs">{lowStockItems.slice(0, 3).map((i) => i.name).join(', ')}{lowStockItems.length > 3 ? ` +${lowStockItems.length - 3} more` : ''}</p>
           </div>
           <button onClick={() => setFilterLowStock(!filterLowStock)} className="px-3 py-1.5 rounded-md text-xs font-medium bg-white text-red-700 border border-red-200 hover:bg-red-50">
@@ -912,7 +776,7 @@ export default function InventoryPage() {
                     )}
                     <th className="h-12 px-4 text-left font-medium text-muted-foreground">SKU &amp; Product</th>
                     <th className="h-12 px-4 text-left font-medium text-muted-foreground">Category</th>
-                    {filterHub === 'All' && <th className="h-12 px-4 text-left font-medium text-muted-foreground">Hub</th>}
+                    {hubScope.filterHub === 'All' && <th className="h-12 px-4 text-left font-medium text-muted-foreground">Hub</th>}
                     <th className="h-12 px-4 text-center font-medium text-muted-foreground">Status</th>
                     <th className="h-12 px-4 text-center font-medium text-muted-foreground">Stock</th>
                     <th className="h-12 px-4 text-right font-medium text-muted-foreground">Cost / Price</th>
@@ -949,7 +813,7 @@ export default function InventoryPage() {
                         <td className="p-4">
                           <span className="inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{item.category}</span>
                         </td>
-                        {filterHub === 'All' && (
+                        {hubScope.filterHub === 'All' && (
                           <td className="p-4">
                             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                               <MapPin size={10} /> {item.location}
@@ -1475,9 +1339,13 @@ export default function InventoryPage() {
               </div>
               <div className="space-y-2 col-span-2">
                 <label className={labelCls}>Location Hub</label>
-                <select value={newProduct.location} onChange={(e) => setNewProduct({ ...newProduct, location: e.target.value })} className={inputCls}>
-                  {activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
-                </select>
+                {hubScope.canSwitchHubs ? (
+                  <select value={newProduct.location} onChange={(e) => setNewProduct({ ...newProduct, location: e.target.value })} className={inputCls}>
+                    {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                  </select>
+                ) : (
+                  <input type="text" readOnly disabled value={hubScope.hubName} className={`${inputCls} opacity-80 cursor-not-allowed`} />
+                )}
               </div>
             </div>
             {/* Margin warning */}
@@ -1529,9 +1397,13 @@ export default function InventoryPage() {
               </div>
               <div className="space-y-2">
                 <label className={labelCls}>Location Hub</label>
-                <select value={editProduct.location} onChange={(e) => setEditProduct({ ...editProduct, location: e.target.value })} className={inputCls}>
-                  {activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
-                </select>
+                {hubScope.canSwitchHubs ? (
+                  <select value={editProduct.location} onChange={(e) => setEditProduct({ ...editProduct, location: e.target.value })} className={inputCls}>
+                    {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                  </select>
+                ) : (
+                  <input type="text" readOnly disabled value={editProduct.location || hubScope.hubName} className={`${inputCls} opacity-80 cursor-not-allowed`} />
+                )}
               </div>
               <div className="space-y-2">
                 <label className={labelCls}>Avg Unit Cost (&#8358;)</label>

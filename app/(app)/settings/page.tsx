@@ -1,14 +1,26 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { useAgents, useSaveAgents, useHubs, useSaveHubs } from '@/hooks/use-queries';
-import { usePermissions } from '@/hooks/use-permissions';
-import { StorageService } from '@/lib/storage-service';
 import {
-  getRolePermissions, saveRolePermissions, DEFAULT_ROLE_PERMISSIONS,
+  useAgents, useCreateAgent, useUpdateAgent, useDeleteAgent,
+  useHubs, useCreateHub, useUpdateHub, useDeleteHub,
+  useRoles, useUpdateRole, useResetPassword, useUpdateProfile,
+} from '@/hooks/use-queries';
+import { usePermissions } from '@/hooks/use-permissions';
+import { useDataScope } from '@/hooks/use-data-scope';
+import { HAS_API } from '@/lib/require-api';
+import {
   PERMISSION_GROUPS, Permission, RoleName,
 } from '@/lib/permissions';
+import {
+  buildRolePermissionsMap,
+  defaultPermissionsForRoleLabel,
+  fePermissionsToApiInput,
+  isCompanyAdminRole,
+  roleLabel,
+} from '@/lib/role-permissions';
+import { ApiRole } from '@/types/api';
 import { Agent, Hub } from '@/types';
 import { toast } from 'sonner';
 import {
@@ -22,15 +34,33 @@ const labelCls = 'text-sm font-medium';
 const btnPrimary = 'inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2';
 const btnSecondary = 'inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2';
 
-const ROLES: RoleName[] = ['Company Admin', 'Hub Manager', 'Finance', 'Customer Success'];
-
 export default function SettingsPage() {
-  const { user, updateProfile } = useAuth();
-  const { data: agents = [] } = useAgents();
+  const { user, refetch: refetchUser } = useAuth();
+  const { canSwitchHubs, hubId: scopeHubId } = useDataScope();
+  const agentsQuery = useMemo(
+    () => (HAS_API && !canSwitchHubs && scopeHubId ? { hub_id: scopeHubId, limit: 200 } : { limit: 200 }),
+    [canSwitchHubs, scopeHubId],
+  );
+  const { data: agents = [] } = useAgents(agentsQuery);
   const { data: hubs = [] } = useHubs();
-  const saveAgents = useSaveAgents();
-  const saveHubs = useSaveHubs();
+  const { data: apiRoles = [] } = useRoles();
+  const createAgent = useCreateAgent();
+  const updateAgent = useUpdateAgent();
+  const deleteAgent = useDeleteAgent();
+  const createHub = useCreateHub();
+  const updateHub = useUpdateHub();
+  const deleteHub = useDeleteHub();
+  const updateRole = useUpdateRole();
+  const resetPassword = useResetPassword();
+  const updateProfile = useUpdateProfile();
   const { can } = usePermissions();
+
+  const systemRoles: ApiRole[] = useMemo(() => {
+    if (!HAS_API || apiRoles.length === 0) return [];
+    return [...apiRoles]
+      .filter((r) => r.is_system !== false)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [apiRoles]);
 
   const canManageUsers = can('settings.manage_users');
   const canManageHubs = can('settings.manage_hubs');
@@ -43,8 +73,9 @@ export default function SettingsPage() {
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
   const [phone, setPhone] = useState(user?.phone || '');
-  const [location, setLocation] = useState(user?.location || 'Lagos');
+  const [location, setLocation] = useState(user?.hubName ?? user?.location ?? 'All Hubs');
   const [loading, setLoading] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [darkMode, setDarkMode] = useState(false);
@@ -57,32 +88,85 @@ export default function SettingsPage() {
   const [editingHub, setEditingHub] = useState<Partial<Hub>>({ isActive: true });
 
   // Roles & Permissions state
-  const [rolePerms, setRolePerms] = useState<Record<RoleName, Permission[]>>(getRolePermissions);
-  const [selectedRole, setSelectedRole] = useState<RoleName>('Hub Manager');
+  const [rolePerms, setRolePerms] = useState<Record<string, Permission[]>>({});
+  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(PERMISSION_GROUPS.map((g) => g.label)));
   const [rolesDirty, setRolesDirty] = useState(false);
+
+  const selectedRoleRecord = useMemo(
+    () => systemRoles.find((r) => r._id === selectedRoleId) ?? systemRoles[0],
+    [systemRoles, selectedRoleId],
+  );
+  const selectedRoleLabel = (selectedRoleRecord
+    ? roleLabel(selectedRoleRecord)
+    : 'Hub Manager') as RoleName;
+
+  const syncRolesFromApi = useCallback(() => {
+    if (!HAS_API || apiRoles.length === 0) return;
+    setRolePerms(buildRolePermissionsMap(apiRoles));
+    if (!selectedRoleId) {
+      const defaultRole = apiRoles.find((r) => r.name === 'hub_manager') ?? apiRoles[0];
+      setSelectedRoleId(defaultRole._id);
+    }
+  }, [apiRoles, selectedRoleId]);
 
   useEffect(() => {
     setDarkMode(document.documentElement.classList.contains('dark'));
   }, []);
 
+  useEffect(() => {
+    syncRolesFromApi();
+  }, [syncRolesFromApi]);
+
+  useEffect(() => {
+    if (!user) return;
+    setName(user.name || '');
+    setEmail(user.email || '');
+    setPhone(user.phone || '');
+    setLocation(user.hubName ?? user.location ?? '');
+  }, [user]);
+
   // ── Profile ──
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) {
+      toast.error('Name is required.');
+      return;
+    }
+    if (!HAS_API) {
+      toast.info('Connect to the API to save profile changes.');
+      return;
+    }
     setLoading(true);
-    await updateProfile({ name, email, phone, location });
-    setLoading(false);
-    toast.success('Profile updated.');
+    try {
+      await updateProfile.mutateAsync({
+        full_name: name.trim(),
+        phone: phone.trim(),
+      });
+      await refetchUser();
+      toast.success('Profile updated.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update profile.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePasswordUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPassword || newPassword !== confirmPassword) { toast.error('Passwords do not match.'); return; }
+    if (!currentPassword) { toast.error('Enter your current password.'); return; }
+    if (!newPassword || newPassword.length < 8) { toast.error('New password must be at least 8 characters.'); return; }
+    if (newPassword !== confirmPassword) { toast.error('Passwords do not match.'); return; }
     setLoading(true);
-    await updateProfile({ password: newPassword });
-    setLoading(false);
-    setNewPassword(''); setConfirmPassword('');
-    toast.success('Password changed.');
+    try {
+      await resetPassword.mutateAsync({ currentPassword, newPassword });
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      toast.success('Password updated successfully.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update password.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleDarkMode = () => {
@@ -92,22 +176,52 @@ export default function SettingsPage() {
     else { document.documentElement.classList.remove('dark'); localStorage.setItem('fudfarmer_theme', 'light'); }
   };
 
+  const resolveRoleId = (roleLabelName: string) =>
+    apiRoles.find((r) => r.label === roleLabelName || r.name === roleLabelName.replace(/\s+/g, '_').toLowerCase())?._id;
+
+  const resolveHubId = (hubName: string) => hubs.find((h) => h.name === hubName)?.id;
+
+  const isCompanyAdminSelection = (roleLabelName: string) =>
+    roleLabelName === 'Company Admin' || apiRoles.some((r) => r.label === roleLabelName && r.name === 'company_admin');
+
   // ── Users ──
-  const handleSaveUser = () => {
+  const handleSaveUser = async () => {
     if (!editingUser.name || !editingUser.email) { toast.error('Name and email required.'); return; }
-    if (editingUser.id) {
-      saveAgents.mutate(agents.map((a) => a.id === editingUser.id ? { ...a, ...editingUser } as Agent : a));
-    } else {
-      const newAgent: Agent = {
-        id: StorageService.generateId(), name: editingUser.name!, email: editingUser.email!,
-        phone: editingUser.phone || '', role: editingUser.role as Agent['role'] || 'Hub Manager',
-        location: editingUser.location || activeHubs[0]?.name || 'Lagos',
-        joinedDate: new Date().toISOString().split('T')[0], password: 'password',
-      };
-      saveAgents.mutate([...agents, newAgent]);
+    const roleId = resolveRoleId(editingUser.role as string);
+    if (HAS_API && !roleId) { toast.error('Invalid role selected.'); return; }
+    const hubId = !isCompanyAdminSelection(editingUser.role as string)
+      ? (canSwitchHubs ? resolveHubId(editingUser.location || '') : scopeHubId)
+      : undefined;
+    if (HAS_API && !isCompanyAdminSelection(editingUser.role as string) && !hubId) {
+      toast.error('Hub is required for this role.');
+      return;
     }
-    setShowUserModal(false); setEditingUser({ role: 'Hub Manager', location: activeHubs[0]?.name || 'Lagos' });
-    toast.success('User saved.');
+    try {
+      if (editingUser.id) {
+        await updateAgent.mutateAsync({
+          id: editingUser.id,
+          full_name: editingUser.name,
+          email: editingUser.email,
+          phone: editingUser.phone || '',
+          ...(roleId ? { role_id: roleId } : {}),
+          ...(hubId !== undefined ? { hub_id: hubId ?? undefined } : {}),
+        });
+      } else {
+        await createAgent.mutateAsync({
+          full_name: editingUser.name!,
+          email: editingUser.email!,
+          phone: editingUser.phone || '',
+          role_id: roleId!,
+          hub_id: hubId ?? undefined,
+        });
+        toast.success('User created. A welcome email with login details was sent.');
+      }
+      setShowUserModal(false);
+      setEditingUser({ role: 'Hub Manager', location: activeHubs[0]?.name || user?.hubName || 'Lagos' });
+      if (editingUser.id) toast.success('User saved.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save user.');
+    }
   };
 
   const handleDeleteUser = (id: string) => {
@@ -116,35 +230,45 @@ export default function SettingsPage() {
   };
 
   // ── Hubs ──
-  const handleSaveHub = () => {
+  const handleSaveHub = async () => {
     if (!editingHub.name) { toast.error('Hub name is required.'); return; }
     const duplicate = hubs.find((h) => h.name.toLowerCase() === editingHub.name!.toLowerCase() && h.id !== editingHub.id);
     if (duplicate) { toast.error('A hub with that name already exists.'); return; }
 
-    if (editingHub.id) {
-      saveHubs.mutate(hubs.map((h) => h.id === editingHub.id ? { ...h, ...editingHub } as Hub : h));
-      StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'HUB_UPDATED', entityType: 'System', details: `Hub "${editingHub.name}" updated`, location: user?.location || activeHubs[0]?.name || 'Lagos' });
-    } else {
-      const newHub: Hub = {
-        id: StorageService.generateId(),
-        name: editingHub.name!,
-        address: editingHub.address || '',
-        phone: editingHub.phone || '',
-        managerName: editingHub.managerName || '',
-        isActive: editingHub.isActive !== false,
-        createdDate: new Date().toISOString().split('T')[0],
-      };
-      saveHubs.mutate([...hubs, newHub]);
-      StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'HUB_CREATED', entityType: 'System', details: `New hub "${newHub.name}" created`, location: user?.location || activeHubs[0]?.name || 'Lagos' });
+    try {
+      if (editingHub.id) {
+        await updateHub.mutateAsync({
+          id: editingHub.id,
+          hub_name: editingHub.name,
+          hub_address: editingHub.address,
+          hub_phone: editingHub.phone,
+          manager_name: editingHub.managerName,
+          is_active: editingHub.isActive,
+        });
+      } else {
+        await createHub.mutateAsync({
+          hub_name: editingHub.name!,
+          hub_address: editingHub.address,
+          hub_phone: editingHub.phone,
+          manager_name: editingHub.managerName,
+          is_active: editingHub.isActive !== false,
+        });
+      }
+      setShowHubModal(false);
+      setEditingHub({ isActive: true });
+      toast.success('Hub saved.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save hub.');
     }
-    setShowHubModal(false);
-    setEditingHub({ isActive: true });
-    toast.success('Hub saved.');
   };
 
-  const handleToggleHub = (hub: Hub) => {
-    saveHubs.mutate(hubs.map((h) => h.id === hub.id ? { ...h, isActive: !h.isActive } : h));
-    toast.success(hub.isActive ? `Hub "${hub.name}" deactivated.` : `Hub "${hub.name}" activated.`);
+  const handleToggleHub = async (hub: Hub) => {
+    try {
+      await updateHub.mutateAsync({ id: hub.id, is_active: !hub.isActive });
+      toast.success(hub.isActive ? `Hub "${hub.name}" deactivated.` : `Hub "${hub.name}" activated.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update hub.');
+    }
   };
 
   const handleDeleteHub = (id: string) => {
@@ -152,11 +276,13 @@ export default function SettingsPage() {
   };
 
   // ── Roles & Permissions ──
+  const rolePermKey = selectedRoleId;
+
   const togglePermission = (perm: Permission) => {
-    if (selectedRole === 'Company Admin') return; // Admin always has all
-    const current = rolePerms[selectedRole] || [];
+    if (selectedRoleRecord && isCompanyAdminRole(selectedRoleRecord)) return;
+    const current = rolePerms[rolePermKey] || [];
     const next = current.includes(perm) ? current.filter((p) => p !== perm) : [...current, perm];
-    setRolePerms({ ...rolePerms, [selectedRole]: next });
+    setRolePerms({ ...rolePerms, [rolePermKey]: next });
     setRolesDirty(true);
   };
 
@@ -167,49 +293,84 @@ export default function SettingsPage() {
   };
 
   const toggleAllInGroup = (group: typeof PERMISSION_GROUPS[0]) => {
-    if (selectedRole === 'Company Admin') return;
-    const current = rolePerms[selectedRole] || [];
+    if (selectedRoleRecord && isCompanyAdminRole(selectedRoleRecord)) return;
+    const current = rolePerms[rolePermKey] || [];
     const groupKeys = group.permissions.map((p) => p.key);
     const allSelected = groupKeys.every((k) => current.includes(k));
     const next = allSelected
       ? current.filter((p) => !groupKeys.includes(p))
       : [...new Set([...current, ...groupKeys])];
-    setRolePerms({ ...rolePerms, [selectedRole]: next });
+    setRolePerms({ ...rolePerms, [rolePermKey]: next });
     setRolesDirty(true);
   };
 
-  const handleSaveRoles = () => {
-    saveRolePermissions(rolePerms);
-    setRolesDirty(false);
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'ROLES_UPDATED', entityType: 'System', details: `Permissions updated for "${selectedRole}"`, location: user?.location || 'Lagos' });
-    toast.success(`Permissions saved for ${selectedRole}.`);
+  const handleSaveRoles = async () => {
+    if (!HAS_API || !selectedRoleId) {
+      toast.error('Connect to the API to save role permissions.');
+      return;
+    }
+    const perms = rolePerms[rolePermKey] ?? [];
+    try {
+      await updateRole.mutateAsync({
+        id: selectedRoleId,
+        permissions: fePermissionsToApiInput(perms),
+      });
+      setRolesDirty(false);
+      toast.success(`Permissions saved for ${selectedRoleLabel}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save permissions.');
+    }
   };
 
   const handleResetRoles = () => {
     setConfirmAction({ type: 'resetRoles' });
   };
 
-  const selectedPerms = rolePerms[selectedRole] || [];
+  const selectedPerms = rolePerms[rolePermKey] || [];
   const permCount = selectedPerms.length;
   const totalPerms = PERMISSION_GROUPS.reduce((sum, g) => sum + g.permissions.length, 0);
+  const isAdminRoleSelected = selectedRoleRecord
+    ? isCompanyAdminRole(selectedRoleRecord)
+    : false;
+
+  const roleTabs = useMemo(
+    () => systemRoles.map((r) => ({
+      id: r._id,
+      label: roleLabel(r) as RoleName,
+    })),
+    [systemRoles],
+  );
 
   // ── Confirm action executor ──
-  const executeConfirmAction = () => {
+  const executeConfirmAction = async () => {
     if (!confirmAction) return;
-    if (confirmAction.type === 'deleteUser' && confirmAction.payload) {
-      saveAgents.mutate(agents.filter((a) => a.id !== confirmAction.payload));
-      toast.success('User deleted.');
-    } else if (confirmAction.type === 'deleteHub' && confirmAction.payload) {
-      saveHubs.mutate(hubs.filter((h) => h.id !== confirmAction.payload));
-      StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'HUB_DELETED', entityType: 'System', details: `Hub deleted`, location: user?.location || activeHubs[0]?.name || 'Lagos' });
-      toast.success('Hub deleted.');
-    } else if (confirmAction.type === 'resetData') {
-      StorageService.resetData();
-    } else if (confirmAction.type === 'resetRoles') {
-      setRolePerms({ ...DEFAULT_ROLE_PERMISSIONS });
-      saveRolePermissions({ ...DEFAULT_ROLE_PERMISSIONS });
-      setRolesDirty(false);
-      toast.success('All role permissions reset to defaults.');
+    try {
+      if (confirmAction.type === 'deleteUser' && confirmAction.payload) {
+        await deleteAgent.mutateAsync(confirmAction.payload);
+        toast.success('User deleted.');
+      } else if (confirmAction.type === 'deleteHub' && confirmAction.payload) {
+        await deleteHub.mutateAsync(confirmAction.payload);
+        toast.success('Hub deleted.');
+      } else if (confirmAction.type === 'resetData') {
+        toast.error('Local demo data reset is no longer available. Use the API-backed environment.');
+      } else if (confirmAction.type === 'resetRoles') {
+        if (!HAS_API) {
+          toast.error('Connect to the API to reset role permissions.');
+        } else {
+          for (const role of systemRoles) {
+            if (isCompanyAdminRole(role)) continue;
+            await updateRole.mutateAsync({
+              id: role._id,
+              permissions: fePermissionsToApiInput(defaultPermissionsForRoleLabel(role.label)),
+            });
+          }
+          syncRolesFromApi();
+          setRolesDirty(false);
+          toast.success('All role permissions reset to defaults.');
+        }
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Action failed.');
     }
     setConfirmAction(null);
   };
@@ -256,12 +417,10 @@ export default function SettingsPage() {
             <h3 className="font-bold flex items-center gap-2"><User size={18} /> Profile Information</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2"><label className={labelCls}>Full Name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} /></div>
-              <div className="space-y-2"><label className={labelCls}>Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} /></div>
+              <div className="space-y-2"><label className={labelCls}>Email</label><input type="email" value={email} readOnly disabled className={`${inputCls} opacity-70 cursor-not-allowed`} title="Email is managed by your administrator" /></div>
               <div className="space-y-2"><label className={labelCls}>Phone</label><input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputCls} /></div>
-              <div className="space-y-2"><label className={labelCls}>Hub Location</label>
-                <select value={location} onChange={(e) => setLocation(e.target.value)} className={inputCls}>
-                  {activeHubs.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
-                </select>
+              <div className="space-y-2"><label className={labelCls}>Hub</label>
+                <input type="text" value={location || '—'} readOnly disabled className={`${inputCls} opacity-70 cursor-not-allowed`} title="Hub is assigned by your administrator" />
               </div>
             </div>
             <div className="flex items-center gap-3 pt-2">
@@ -274,10 +433,12 @@ export default function SettingsPage() {
           <form onSubmit={handlePasswordUpdate} className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
             <h3 className="font-bold flex items-center gap-2"><Lock size={18} /> Change Password</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2"><label className={labelCls}>New Password</label><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={inputCls} />{newPassword && (<div className="mt-2 space-y-1"><div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full transition-all duration-300 ${passwordStrength.color} ${passwordStrength.width}`} /></div><p className={`text-xs font-medium ${passwordStrength.color === 'bg-destructive' ? 'text-destructive' : passwordStrength.color === 'bg-yellow-500' ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400'}`}>{passwordStrength.label}</p></div>)}</div>
-              <div className="space-y-2"><label className={labelCls}>Confirm Password</label><input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={inputCls} /></div>
+              <div className="space-y-2 md:col-span-2"><label className={labelCls}>Current Password</label><input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className={inputCls} autoComplete="current-password" /></div>
+              <div className="space-y-2"><label className={labelCls}>New Password</label><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={inputCls} autoComplete="new-password" />{newPassword && (<div className="mt-2 space-y-1"><div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full transition-all duration-300 ${passwordStrength.color} ${passwordStrength.width}`} /></div><p className={`text-xs font-medium ${passwordStrength.color === 'bg-destructive' ? 'text-destructive' : passwordStrength.color === 'bg-yellow-500' ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400'}`}>{passwordStrength.label}</p></div>)}</div>
+              <div className="space-y-2"><label className={labelCls}>Confirm Password</label><input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={inputCls} autoComplete="new-password" /></div>
             </div>
-            <button type="submit" disabled={loading} className={btnPrimary}><Lock size={14} className="mr-2" /> Update Password</button>
+            <button type="submit" disabled={loading || !HAS_API} className={btnPrimary}><Lock size={14} className="mr-2" /> Update Password</button>
+            {!HAS_API && <p className="text-xs text-muted-foreground">Connect to the API to change your password.</p>}
           </form>
         </div>
       )}
@@ -381,6 +542,13 @@ export default function SettingsPage() {
       {/* ══════ ROLES & PERMISSIONS TAB ══════ */}
       {activeTab === 'Roles & Permissions' && (
         <div className="space-y-5">
+          {!HAS_API ? (
+            <div className="rounded-xl border bg-card p-6 shadow-sm text-center">
+              <Shield size={32} className="mx-auto text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">Connect to the API to manage roles and permissions.</p>
+            </div>
+          ) : (
+        <>
           {/* Role selector */}
           <div className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
@@ -396,20 +564,20 @@ export default function SettingsPage() {
 
             {/* Role pills */}
             <div className="flex flex-wrap gap-2">
-              {ROLES.map((role) => {
-                const count = (rolePerms[role] || []).length;
+              {roleTabs.map((role) => {
+                const count = (rolePerms[role.id] || []).length;
                 return (
                   <button
-                    key={role}
-                    onClick={() => setSelectedRole(role)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${selectedRole === role
+                    key={role.id}
+                    onClick={() => setSelectedRoleId(role.id)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${selectedRoleId === role.id
                       ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
                       : 'border-input hover:bg-accent'
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${roleColorMap[role].split(' ')[0]}`} />
-                      <span>{role}</span>
+                      <span className={`h-2 w-2 rounded-full ${roleColorMap[role.label].split(' ')[0]}`} />
+                      <span>{role.label}</span>
                       <span className="text-[10px] text-muted-foreground font-normal">{count}/{totalPerms}</span>
                     </div>
                   </button>
@@ -417,7 +585,7 @@ export default function SettingsPage() {
               })}
             </div>
 
-            {selectedRole === 'Company Admin' && (
+            {isAdminRoleSelected && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm">
                 <Shield size={16} className="text-amber-600 shrink-0" />
                 <span className="text-amber-800 dark:text-amber-300">Company Admin always has full access to all features. Permissions cannot be modified.</span>
@@ -445,14 +613,14 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-3">
                         <button
                           onClick={(e) => { e.stopPropagation(); toggleAllInGroup(group); }}
-                          disabled={selectedRole === 'Company Admin'}
+                          disabled={isAdminRoleSelected}
                           className={`h-5 w-5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
                             allSelected
                               ? 'bg-primary border-primary text-white'
                               : someSelected
                               ? 'border-primary bg-primary/20'
                               : 'border-muted-foreground/30 hover:border-primary'
-                          } ${selectedRole === 'Company Admin' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          } ${isAdminRoleSelected ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           {allSelected && <Check size={12} strokeWidth={3} />}
                           {someSelected && !allSelected && <div className="h-0.5 w-2 bg-primary rounded" />}
@@ -475,16 +643,16 @@ export default function SettingsPage() {
                               key={perm.key}
                               className={`flex items-center gap-3 py-2 px-3 rounded-md cursor-pointer transition-colors ${
                                 checked ? 'bg-primary/5' : 'hover:bg-accent/50'
-                              } ${selectedRole === 'Company Admin' ? 'cursor-not-allowed opacity-70' : ''}`}
+                              } ${isAdminRoleSelected ? 'cursor-not-allowed opacity-70' : ''}`}
                             >
                               <button
                                 onClick={() => togglePermission(perm.key)}
-                                disabled={selectedRole === 'Company Admin'}
+                                disabled={isAdminRoleSelected}
                                 className={`h-4.5 w-4.5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
                                   checked
                                     ? 'bg-primary border-primary text-white'
                                     : 'border-muted-foreground/30 hover:border-primary'
-                                } ${selectedRole === 'Company Admin' ? 'opacity-50' : ''}`}
+                                } ${isAdminRoleSelected ? 'opacity-50' : ''}`}
                                 style={{ minWidth: '18px', minHeight: '18px', width: '18px', height: '18px' }}
                               >
                                 {checked && <Check size={11} strokeWidth={3} />}
@@ -512,12 +680,14 @@ export default function SettingsPage() {
           {/* Save bar */}
           {rolesDirty && canManageRoles && (
             <div className="sticky bottom-4 flex items-center justify-between p-4 rounded-xl border bg-card shadow-lg">
-              <p className="text-sm font-medium">Unsaved changes for <span className="text-primary">{selectedRole}</span></p>
+              <p className="text-sm font-medium">Unsaved changes for <span className="text-primary">{selectedRoleLabel}</span></p>
               <div className="flex gap-2">
-                <button onClick={() => { setRolePerms(getRolePermissions()); setRolesDirty(false); }} className={btnSecondary}>Discard</button>
+                <button onClick={() => { syncRolesFromApi(); setRolesDirty(false); }} className={btnSecondary}>Discard</button>
                 <button onClick={handleSaveRoles} className={btnPrimary}><Save size={14} className="mr-2" /> Save Permissions</button>
               </div>
             </div>
+          )}
+        </>
           )}
         </div>
       )}
@@ -561,10 +731,17 @@ export default function SettingsPage() {
               <div className="space-y-2"><label className={labelCls}>Email *</label><input type="email" value={editingUser.email || ''} onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })} className={inputCls} /></div>
               <div className="space-y-2"><label className={labelCls}>Phone</label><input type="text" value={editingUser.phone || ''} onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })} className={inputCls} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><label className={labelCls}>Role</label><select value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as Agent['role'] })} className={inputCls}><option>Company Admin</option><option>Hub Manager</option><option>Finance</option><option>Customer Success</option></select></div>
+                <div className="space-y-2"><label className={labelCls}>Role</label><select value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as Agent['role'] })} className={inputCls} disabled={!canSwitchHubs && !!editingUser.id}><option>Company Admin</option><option>Hub Manager</option><option>Finance</option><option>Customer Success</option></select></div>
                 <div className="space-y-2"><label className={labelCls}>Hub</label>
-                  <select value={editingUser.location} onChange={(e) => setEditingUser({ ...editingUser, location: e.target.value })} className={inputCls}>
-                    {activeHubs.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
+                  <select
+                    value={editingUser.location}
+                    onChange={(e) => setEditingUser({ ...editingUser, location: e.target.value })}
+                    className={inputCls}
+                    disabled={!canSwitchHubs || isCompanyAdminSelection(editingUser.role as string)}
+                  >
+                    {(canSwitchHubs ? activeHubs : hubs.filter((h) => h.id === scopeHubId || h.name === user?.hubName)).map((h) => (
+                      <option key={h.id} value={h.name}>{h.name}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -574,8 +751,8 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-1">
                   {PERMISSION_GROUPS.map((group) => {
                     const groupPerms = group.permissions.map((p) => p.key);
-                    const roleKey = (editingUser.role || 'Hub Manager') as RoleName;
-                    const rp = rolePerms[roleKey] || [];
+                    const previewKey = resolveRoleId(editingUser.role as string) ?? '';
+                    const rp = rolePerms[previewKey] || [];
                     const count = groupPerms.filter((k) => rp.includes(k as Permission)).length;
                     if (count === 0) return null;
                     return (
