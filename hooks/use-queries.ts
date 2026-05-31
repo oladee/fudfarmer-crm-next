@@ -26,6 +26,8 @@ import {
   ApiSegment,
   ApiDashboardMetricsRaw,
   DashboardMetricsData,
+  AnalyticsOverviewData,
+  EMPTY_ANALYTICS_OVERVIEW,
 } from '@/types/api';
 import {
   mapCreditCustomerSummary,
@@ -53,7 +55,6 @@ import {
   mapTask,
   mapSegment,
   buildHubMap,
-  toLegacyCreditFromSummary,
   normalizeDashboardMetrics,
 } from '@/lib/api-mappers';
 import {
@@ -101,6 +102,23 @@ export function useWhoAmI() {
     },
     retry: false,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAnalyticsOverview(filters?: { hub_id?: string }) {
+  return useQuery({
+    queryKey: ['analyticsOverview', filters],
+    queryFn: async () => {
+      if (!HAS_API) return EMPTY_ANALYTICS_OVERVIEW;
+      const params = new URLSearchParams();
+      if (filters?.hub_id) params.set('hub_id', filters.hub_id);
+      const qs = params.toString();
+      const res = await axiosGet(
+        `analytics/overview${qs ? `?${qs}` : ''}`,
+        true,
+      ) as ApiResponse<AnalyticsOverviewData>;
+      return res.data;
+    },
   });
 }
 
@@ -679,18 +697,6 @@ export function useCreditRecord(id: string | null) {
       return mapCreditRecord(res.data);
     },
     enabled: !!id,
-  });
-}
-
-/** Legacy shape for analytics / sidebar badge */
-export function useCredits() {
-  return useQuery({
-    queryKey: ['credits'],
-    queryFn: async () => {
-      if (!HAS_API) return [];
-      const summaryRes = await axiosGet('credits/summary', true) as ApiListResponse<ApiCreditCustomerSummary[]>;
-      return toLegacyCreditFromSummary(summaryRes.data);
-    },
   });
 }
 

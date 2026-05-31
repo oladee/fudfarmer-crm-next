@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AuthContextType } from '@/types';
 import { useWhoAmI } from '@/hooks/use-queries';
 import { axiosPost } from '@/lib/api';
+import { clearSessionMarker, setSessionMarker } from '@/lib/session-marker';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -22,13 +23,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (user || isError) setLoading(false);
   }, [user, isError]);
 
+  useEffect(() => {
+    if (user) setSessionMarker();
+    else if (isError) clearSessionMarker();
+  }, [user, isError]);
+
   const login = async (email: string, password: string) => {
     await axiosPost('auth/login', { email, password }, true);
-    await refetch();
-    router.replace('/');
+    const result = await refetch();
+    if (result.data) {
+      setSessionMarker();
+      router.replace('/');
+    }
   };
 
   const logout = async () => {
+    clearSessionMarker();
     await axiosPost('auth/logout', {}, true);
     router.push('/login');
   };

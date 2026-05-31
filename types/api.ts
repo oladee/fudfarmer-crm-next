@@ -356,3 +356,99 @@ export interface DashboardMetricsData {
   enquiries: Enquiry[];
   creditSummaries: CreditCustomerSummary[];
 }
+
+export interface AnalyticsOverviewData {
+  sales: {
+    monthlyTrend: { month: string; revenue: number; orders: number }[];
+    growth: {
+      revGrowth: number;
+      orderGrowth: number;
+      currMonth: string;
+      prevMonth: string;
+    } | null;
+    dayOfWeekPattern: { day: string; revenue: number; avgRevenue: number; orders: number }[];
+    channelBreakdown: { name: string; revenue: number; count: number }[];
+    paymentModeSplit: { name: string; value: number; count: number }[];
+    paymentTypeSplit: { name: string; value: number; count: number }[];
+    collectedVsOutstanding: { collected: number; outstanding: number; total: number };
+    aovTrend: { month: string; aov: number }[];
+    totalRevenue: number;
+  };
+  products: {
+    productRevenue: { name: string; category: string; revenue: number; count: number }[];
+    categoryRevenue: { name: string; revenue: number; orders: number; fill: string }[];
+    stockTurnover: {
+      name: string;
+      category: string;
+      unitsSold: number;
+      currentStock: number;
+      turnover: number;
+      fill: string;
+    }[];
+    deadStock: { id: string; name: string; category: string; currentStock: number }[];
+  };
+  customers: {
+    kpis: { totalCustomers: number; avgLifetimeValue: number; repeatRate: number };
+    acquisitionTrend: { month: string; new: number; total: number }[];
+    clvDistribution: { label: string; min: number; max: number; count: number }[];
+    segmentData: { name: string; value: number }[];
+    buyerAnalysis: { name: string; value: number; fill: string }[];
+    topSpenders: { id: string; name: string; type: string; totalSpent: number }[];
+    repeatCustomers: { id: string; name: string; type: string; totalOrders: number; totalSpent: number }[];
+    concentration: { top20Pct: number; top20Count: number; total: number; totalRev: number };
+    feedback: { sentiments: { name: string; value: number }[]; complaintsBySegment: { name: string; value: number }[] };
+  };
+  credit: {
+    kpis: { totalOutstanding: number; totalOverdue: number; totalCleared: number; collectionRate: number };
+    agingReport: { label: string; min: number; max: number; amount: number; count: number }[];
+    topDebtors: { id: string; customerId: string; customerName: string; amountOwed: number; dateIssued: string; status: string }[];
+    customerRisk: {
+      name: string;
+      type: string;
+      totalSpent: number;
+      totalOwed: number;
+      overdueAmount: number;
+      creditRatio: number;
+      overdueCount: number;
+    }[];
+    collectionTrend: { month: string; issued: number; cleared: number; rate: number }[];
+  };
+}
+
+export const EMPTY_ANALYTICS_OVERVIEW: AnalyticsOverviewData = {
+  sales: {
+    monthlyTrend: [],
+    growth: null,
+    dayOfWeekPattern: [],
+    channelBreakdown: [],
+    paymentModeSplit: [],
+    paymentTypeSplit: [],
+    collectedVsOutstanding: { collected: 0, outstanding: 0, total: 0 },
+    aovTrend: [],
+    totalRevenue: 0,
+  },
+  products: {
+    productRevenue: [],
+    categoryRevenue: [],
+    stockTurnover: [],
+    deadStock: [],
+  },
+  customers: {
+    kpis: { totalCustomers: 0, avgLifetimeValue: 0, repeatRate: 0 },
+    acquisitionTrend: [],
+    clvDistribution: [],
+    segmentData: [],
+    buyerAnalysis: [],
+    topSpenders: [],
+    repeatCustomers: [],
+    concentration: { top20Pct: 0, top20Count: 0, total: 0, totalRev: 0 },
+    feedback: { sentiments: [], complaintsBySegment: [] },
+  },
+  credit: {
+    kpis: { totalOutstanding: 0, totalOverdue: 0, totalCleared: 0, collectionRate: 0 },
+    agingReport: [],
+    topDebtors: [],
+    customerRisk: [],
+    collectionTrend: [],
+  },
+};

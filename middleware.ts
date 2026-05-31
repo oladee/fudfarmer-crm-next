@@ -4,7 +4,7 @@ const PUBLIC_PATHS = ['/login'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const sessionCookie = request.cookies.get('crm_session');
+  const sessionCookie = request.cookies.get('crm_session') ?? request.cookies.get('crm_authed');
 
   if (sessionCookie && PUBLIC_PATHS.includes(pathname)) {
     return NextResponse.redirect(new URL('/', request.url));

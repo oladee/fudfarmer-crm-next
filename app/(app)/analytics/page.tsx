@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  useCustomers, useSales,
-  useInventory, useCredits, useStockLogs,
-} from '@/hooks/use-queries';
+import { useAnalyticsOverview } from '@/hooks/use-queries';
+import { useHubScopeFilter } from '@/hooks/use-hub-scope';
+import { HubScopeFilterBar } from '@/components/hub-scope-filter';
+import { HAS_API } from '@/lib/require-api';
+import type { AnalyticsOverviewData } from '@/types/api';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell,
@@ -16,7 +17,7 @@ import {
   ArrowUpRight, ArrowDownRight, Minus, ShoppingCart,
   Truck, AlertTriangle, ChevronRight,
 } from 'lucide-react';
-import { SalesChannel, CustomerType, PaymentMode, PaymentType } from '@/types';
+import { PaymentMode, PaymentType } from '@/types';
 
 const NAIRA = '\u20A6';
 const fmt = (n: number) => `${NAIRA}${n.toLocaleString()}`;
@@ -42,22 +43,11 @@ function getMonthLabel(dateStr: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
 }
 
-function getWeekLabel(dateStr: string): string {
-  const d = new Date(dateStr);
-  const start = new Date(d);
-  start.setDate(d.getDate() - d.getDay());
-  return start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 export default function AnalyticsPage() {
   const router = useRouter();
   const [tab, setTab] = useState<AnalyticsTab>('sales');
-
-  const { data: customers = [] } = useCustomers();
-  const { data: sales = [] } = useSales();
-  const { data: inventory = [] } = useInventory();
-  const { data: credits = [] } = useCredits();
-  const { data: stockLogs = [] } = useStockLogs();
+  const hubScope = useHubScopeFilter();
+  const { data: overview, isLoading } = useAnalyticsOverview({ hub_id: hubScope.hubIdForApi });
 
   const tabs: { key: AnalyticsTab; label: string; icon: React.ElementType }[] = [
     { key: 'sales', label: 'Sales Analysis', icon: TrendingUp },
@@ -76,6 +66,19 @@ export default function AnalyticsPage() {
         <p className="text-sm text-muted-foreground">Deeper insights into FudFarmer operations</p>
       </div>
 
+      <HubScopeFilterBar scope={hubScope} />
+
+      {!HAS_API ? (
+        <div className="rounded-xl border bg-card p-8 shadow-sm text-center">
+          <BarChart3 size={32} className="mx-auto text-muted-foreground mb-2" />
+          <p className="text-sm text-muted-foreground">Connect to the API to view analytics.</p>
+        </div>
+      ) : isLoading || !overview ? (
+        <div className="flex items-center justify-center py-24">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      ) : (
+        <>
       {/* Tab Bar */}
       <div className="flex items-center gap-1 bg-muted/40 p-1 rounded-xl border overflow-x-auto">
         {tabs.map((t) => (
@@ -95,10 +98,12 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Tab Content */}
-      {tab === 'sales' && <SalesAnalysis sales={sales} inventory={inventory} />}
-      {tab === 'products' && <ProductPerformance sales={sales} inventory={inventory} stockLogs={stockLogs} />}
-      {tab === 'customers' && <CustomerInsights customers={customers} sales={sales} router={router} />}
-      {tab === 'credit' && <CreditRisk credits={credits} customers={customers} sales={sales} />}
+      {tab === 'sales' && <SalesAnalysis data={overview.sales} />}
+      {tab === 'products' && <ProductPerformance data={overview.products} />}
+      {tab === 'customers' && <CustomerInsights data={overview.customers} router={router} />}
+      {tab === 'credit' && <CreditRisk data={overview.credit} />}
+        </>
+      )}
     </div>
   );
 }
@@ -106,123 +111,18 @@ export default function AnalyticsPage() {
 /* ═══════════════════════════════════════════════════════
    SALES ANALYSIS TAB
    ═══════════════════════════════════════════════════════ */
-function SalesAnalysis({ sales, inventory }: { sales: any[]; inventory: any[] }) {
-  // Monthly revenue trend
-  const monthlyTrend = useMemo(() => {
-    const map: Record<string, { revenue: number; orders: number }> = {};
-    sales.forEach((s) => {
-      const key = s.date.slice(0, 7); // YYYY-MM
-      if (!map[key]) map[key] = { revenue: 0, orders: 0 };
-      map[key].revenue += s.amount;
-      map[key].orders += 1;
-    });
-    return Object.entries(map)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([key, data]) => ({
-        month: getMonthLabel(key + '-01'),
-        ...data,
-      }));
-  }, [sales]);
-
-  // Month-over-month growth
-  const growth = useMemo(() => {
-    if (monthlyTrend.length < 2) return null;
-    const curr = monthlyTrend[monthlyTrend.length - 1];
-    const prev = monthlyTrend[monthlyTrend.length - 2];
-    const revGrowth = prev.revenue > 0 ? Math.round(((curr.revenue - prev.revenue) / prev.revenue) * 100) : 0;
-    const orderGrowth = prev.orders > 0 ? Math.round(((curr.orders - prev.orders) / prev.orders) * 100) : 0;
-    return { revGrowth, orderGrowth, currMonth: curr.month, prevMonth: prev.month };
-  }, [monthlyTrend]);
-
-  // Weekly pattern (day of week)
-  const dayOfWeekPattern = useMemo(() => {
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const map: Record<number, { revenue: number; count: number }> = {};
-    days.forEach((_, i) => { map[i] = { revenue: 0, count: 0 }; });
-    sales.forEach((s) => {
-      const d = new Date(s.date).getDay();
-      map[d].revenue += s.amount;
-      map[d].count += 1;
-    });
-    return days.map((name, i) => ({
-      day: name,
-      revenue: map[i].revenue,
-      avgRevenue: map[i].count > 0 ? Math.round(map[i].revenue / map[i].count) : 0,
-      orders: map[i].count,
-    }));
-  }, [sales]);
-
-  // Sales channel breakdown
-  const channelBreakdown = useMemo(() => {
-    const channels: Record<string, { revenue: number; count: number }> = {};
-    sales.forEach((s) => {
-      const ch = s.channel || SalesChannel.WALK_IN;
-      if (!channels[ch]) channels[ch] = { revenue: 0, count: 0 };
-      channels[ch].revenue += s.amount;
-      channels[ch].count += 1;
-    });
-    return Object.entries(channels).map(([name, data]) => ({ name, ...data }));
-  }, [sales]);
-
-  // Payment mode split (Full Payment / Full Credit / Partial Credit)
-  const paymentModeSplit = useMemo(() => {
-    const buckets: Record<string, { value: number; count: number }> = {
-      [PaymentMode.FULL_PAYMENT]: { value: 0, count: 0 },
-      [PaymentMode.FULL_CREDIT]: { value: 0, count: 0 },
-      [PaymentMode.PARTIAL_CREDIT]: { value: 0, count: 0 },
-    };
-    sales.forEach((s) => {
-      const mode = s.paymentMode || (s.isCredit ? ((s.amountPaid ?? 0) > 0 ? PaymentMode.PARTIAL_CREDIT : PaymentMode.FULL_CREDIT) : PaymentMode.FULL_PAYMENT);
-      buckets[mode].value += s.amount;
-      buckets[mode].count += 1;
-    });
-    return Object.entries(buckets).map(([name, data]) => ({ name, ...data }));
-  }, [sales]);
-
-  // Payment type split (Cash / Transfer / POS)
-  const paymentTypeSplit = useMemo(() => {
-    const buckets: Record<string, { value: number; count: number }> = {};
-    Object.values(PaymentType).forEach((t) => { buckets[t] = { value: 0, count: 0 }; });
-    sales.forEach((s) => {
-      const type = s.paymentType || PaymentType.CASH;
-      const mode = s.paymentMode || (s.isCredit ? PaymentMode.FULL_CREDIT : PaymentMode.FULL_PAYMENT);
-      if (mode === PaymentMode.FULL_CREDIT) return; // no payment was made
-      if (!buckets[type]) buckets[type] = { value: 0, count: 0 };
-      const paid = s.amountPaid ?? (s.isCredit ? 0 : s.amount);
-      buckets[type].value += paid;
-      buckets[type].count += 1;
-    });
-    return Object.entries(buckets).map(([name, data]) => ({ name, ...data })).filter((d) => d.count > 0);
-  }, [sales]);
-
-  // Collected vs Outstanding
-  const collectedVsOutstanding = useMemo(() => {
-    let collected = 0;
-    let outstanding = 0;
-    sales.forEach((s) => {
-      const paid = s.amountPaid ?? (s.isCredit ? 0 : s.amount);
-      collected += paid;
-      outstanding += Math.max(0, s.amount - paid);
-    });
-    return { collected, outstanding, total: collected + outstanding };
-  }, [sales]);
-
-  // Average order value over time
-  const aovTrend = useMemo(() => {
-    const map: Record<string, { total: number; count: number }> = {};
-    sales.forEach((s) => {
-      const key = s.date.slice(0, 7);
-      if (!map[key]) map[key] = { total: 0, count: 0 };
-      map[key].total += s.amount;
-      map[key].count += 1;
-    });
-    return Object.entries(map)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([key, data]) => ({
-        month: getMonthLabel(key + '-01'),
-        aov: Math.round(data.total / data.count),
-      }));
-  }, [sales]);
+function SalesAnalysis({ data }: { data: AnalyticsOverviewData['sales'] }) {
+  const {
+    monthlyTrend,
+    growth,
+    dayOfWeekPattern,
+    channelBreakdown,
+    paymentModeSplit,
+    paymentTypeSplit,
+    collectedVsOutstanding,
+    aovTrend,
+    totalRevenue,
+  } = data;
 
   const GrowthBadge = ({ value }: { value: number }) => (
     <span className={`inline-flex items-center gap-0.5 text-xs font-bold ${value > 0 ? 'text-emerald-600' : value < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
@@ -255,7 +155,7 @@ function SalesAnalysis({ sales, inventory }: { sales: any[]; inventory: any[] })
         )}
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Total Revenue</p>
-          <p className="text-xl font-black text-emerald-600">{fmtK(sales.reduce((a, s) => a + s.amount, 0))}</p>
+          <p className="text-xl font-black text-emerald-600">{fmtK(totalRevenue)}</p>
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Collected</p>
@@ -460,68 +360,8 @@ function SalesAnalysis({ sales, inventory }: { sales: any[]; inventory: any[] })
 /* ═══════════════════════════════════════════════════════
    PRODUCT PERFORMANCE TAB
    ═══════════════════════════════════════════════════════ */
-function ProductPerformance({ sales, inventory, stockLogs }: { sales: any[]; inventory: any[]; stockLogs: any[] }) {
-  // Revenue by product
-  const productRevenue = useMemo(() => {
-    const map: Record<string, { name: string; category: string; revenue: number; count: number }> = {};
-    sales.forEach((s) => {
-      const item = inventory.find((i) => s.productDetails?.includes(i.name));
-      const name = item?.name || s.productDetails || 'Unknown';
-      const cat = item?.category || 'Other';
-      if (!map[name]) map[name] = { name, category: cat, revenue: 0, count: 0 };
-      map[name].revenue += s.amount;
-      map[name].count += 1;
-    });
-    return Object.values(map).sort((a, b) => b.revenue - a.revenue);
-  }, [sales, inventory]);
-
-  // Revenue by category
-  const categoryRevenue = useMemo(() => {
-    const map: Record<string, { revenue: number; count: number }> = {};
-    sales.forEach((s) => {
-      const item = inventory.find((i) => s.productDetails?.includes(i.name));
-      const cat = item?.category || 'Other';
-      if (!map[cat]) map[cat] = { revenue: 0, count: 0 };
-      map[cat].revenue += s.amount;
-      map[cat].count += 1;
-    });
-    return Object.entries(map)
-      .map(([name, data]) => ({
-        name,
-        revenue: data.revenue,
-        orders: data.count,
-        fill: CAT_COLORS[name] || CAT_COLORS.Other,
-      }))
-      .sort((a, b) => b.revenue - a.revenue);
-  }, [sales, inventory]);
-
-  // Stock turnover (units sold / avg stock level)
-  const stockTurnover = useMemo(() => {
-    return inventory
-      .map((item) => {
-        const soldLogs = stockLogs.filter((l) => l.itemId === item.id && l.type === 'SALE');
-        const unitsSold = soldLogs.reduce((a, l) => a + l.quantity, 0);
-        const avgStock = item.currentStock > 0 ? item.currentStock : 1;
-        return {
-          name: item.name,
-          category: item.category,
-          unitsSold,
-          currentStock: item.currentStock,
-          turnover: Number((unitsSold / avgStock).toFixed(1)),
-          fill: CAT_COLORS[item.category] || CAT_COLORS.Other,
-        };
-      })
-      .sort((a, b) => b.turnover - a.turnover)
-      .slice(0, 15);
-  }, [inventory, stockLogs]);
-
-  // Dead stock (zero sales, has stock)
-  const deadStock = useMemo(() => {
-    return inventory.filter((item) => {
-      const hasSales = sales.some((s) => s.productDetails?.includes(item.name));
-      return !hasSales && item.currentStock > 0;
-    });
-  }, [inventory, sales]);
+function ProductPerformance({ data }: { data: AnalyticsOverviewData['products'] }) {
+  const { productRevenue, categoryRevenue, stockTurnover, deadStock } = data;
 
   return (
     <div className="space-y-5">
@@ -635,7 +475,7 @@ function ProductPerformance({ sales, inventory, stockLogs }: { sales: any[]; inv
             <div className="flex flex-wrap gap-2">
               {deadStock.map((item) => (
                 <span key={item.id} className="text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-full">
-                  {item.name} — {item.currentStock} {item.unitOfMeasure}
+                  {item.name} — {item.currentStock} in stock
                 </span>
               ))}
             </div>
@@ -649,91 +489,16 @@ function ProductPerformance({ sales, inventory, stockLogs }: { sales: any[]; inv
 /* ═══════════════════════════════════════════════════════
    CUSTOMER INSIGHTS TAB
    ═══════════════════════════════════════════════════════ */
-function CustomerInsights({ customers, sales, router }: { customers: any[]; sales: any[]; router: any }) {
-  // Customer acquisition over time
-  const acquisitionTrend = useMemo(() => {
-    const map: Record<string, number> = {};
-    customers.forEach((c) => {
-      const key = c.joinedDate.slice(0, 7);
-      map[key] = (map[key] || 0) + 1;
-    });
-    let cumulative = 0;
-    return Object.entries(map)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([key, count]) => {
-        cumulative += count;
-        return { month: getMonthLabel(key + '-01'), new: count, total: cumulative };
-      });
-  }, [customers]);
-
-  // Customer lifetime value distribution
-  const clvDistribution = useMemo(() => {
-    const brackets = [
-      { label: NAIRA + '0', min: 0, max: 0, count: 0 },
-      { label: '<' + NAIRA + '50k', min: 1, max: 50000, count: 0 },
-      { label: NAIRA + '50k-200k', min: 50000, max: 200000, count: 0 },
-      { label: NAIRA + '200k-500k', min: 200000, max: 500000, count: 0 },
-      { label: NAIRA + '500k-1M', min: 500000, max: 1000000, count: 0 },
-      { label: '>' + NAIRA + '1M', min: 1000000, max: Infinity, count: 0 },
-    ];
-    customers.forEach((c) => {
-      const b = brackets.find((br) => c.totalSpent >= br.min && c.totalSpent < br.max);
-      if (b) b.count += 1;
-    });
-    return brackets;
-  }, [customers]);
-
-  // Segment distribution
-  const segmentData = useMemo(() => {
-    const map: Record<string, number> = {};
-    customers.forEach((c) => {
-      (c.segments || []).forEach((seg: string) => {
-        map[seg] = (map[seg] || 0) + 1;
-      });
-    });
-    if (Object.keys(map).length === 0) {
-      // If no segments, show type distribution
-      customers.forEach((c) => {
-        map[c.type] = (map[c.type] || 0) + 1;
-      });
-    }
-    return Object.entries(map).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  }, [customers]);
-
-  // Repeat vs one-time buyers
-  const buyerAnalysis = useMemo(() => {
-    const onetime = customers.filter((c) => c.totalOrders === 1).length;
-    const repeat = customers.filter((c) => c.totalOrders >= 2).length;
-    const loyal = customers.filter((c) => c.totalOrders >= 5).length;
-    const dormant = customers.filter((c) => c.totalOrders === 0).length;
-    return [
-      { name: 'Dormant (0)', value: dormant, fill: '#ef4444' },
-      { name: 'One-time (1)', value: onetime, fill: '#f59e0b' },
-      { name: 'Repeat (2-4)', value: repeat - loyal, fill: '#0891b2' },
-      { name: 'Loyal (5+)', value: loyal, fill: '#16a34a' },
-    ];
-  }, [customers]);
-
-  // Top spenders
-  const topSpenders = useMemo(() =>
-    [...customers].filter((c) => c.totalSpent > 0).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 10),
-    [customers]
-  );
-
-  // Repeat customers (2+ orders)
-  const repeatCustomers = useMemo(() =>
-    [...customers].filter((c) => c.totalOrders >= 2).sort((a, b) => b.totalOrders - a.totalOrders).slice(0, 10),
-    [customers]
-  );
-
-  // Revenue concentration (top 20% of customers = ?% of revenue)
-  const concentration = useMemo(() => {
-    const sorted = [...customers].sort((a, b) => b.totalSpent - a.totalSpent);
-    const totalRev = sorted.reduce((a, c) => a + c.totalSpent, 0);
-    const top20Count = Math.max(1, Math.ceil(sorted.length * 0.2));
-    const top20Rev = sorted.slice(0, top20Count).reduce((a, c) => a + c.totalSpent, 0);
-    return { top20Pct: pct(top20Rev, totalRev), top20Count, total: sorted.length, totalRev };
-  }, [customers]);
+function CustomerInsights({ data, router }: { data: AnalyticsOverviewData['customers']; router: ReturnType<typeof useRouter> }) {
+  const {
+    kpis,
+    acquisitionTrend,
+    clvDistribution,
+    buyerAnalysis,
+    topSpenders,
+    repeatCustomers,
+    concentration,
+  } = data;
 
   return (
     <div className="space-y-5">
@@ -741,11 +506,11 @@ function CustomerInsights({ customers, sales, router }: { customers: any[]; sale
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Total Customers</p>
-          <p className="text-2xl font-black">{customers.length}</p>
+          <p className="text-2xl font-black">{kpis.totalCustomers}</p>
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Avg Lifetime Value</p>
-          <p className="text-2xl font-black text-emerald-600">{customers.length > 0 ? fmtK(Math.round(customers.reduce((a, c) => a + c.totalSpent, 0) / customers.length)) : '—'}</p>
+          <p className="text-2xl font-black text-emerald-600">{kpis.totalCustomers > 0 ? fmtK(kpis.avgLifetimeValue) : '—'}</p>
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Revenue Concentration</p>
@@ -754,7 +519,7 @@ function CustomerInsights({ customers, sales, router }: { customers: any[]; sale
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Repeat Rate</p>
-          <p className="text-2xl font-black">{pct(customers.filter((c) => c.totalOrders >= 2).length, customers.length)}%</p>
+          <p className="text-2xl font-black">{kpis.repeatRate}%</p>
         </div>
       </div>
 
@@ -917,81 +682,15 @@ function CustomerInsights({ customers, sales, router }: { customers: any[]; sale
 /* ═══════════════════════════════════════════════════════
    CREDIT & RISK TAB
    ═══════════════════════════════════════════════════════ */
-function CreditRisk({ credits, customers, sales }: { credits: any[]; customers: any[]; sales: any[] }) {
-  // Aging analysis
-  const agingReport = useMemo(() => {
-    const now = new Date();
-    const buckets = [
-      { label: 'Current', min: 0, max: 30, amount: 0, count: 0 },
-      { label: '31-60 Days', min: 31, max: 60, amount: 0, count: 0 },
-      { label: '61-90 Days', min: 61, max: 90, amount: 0, count: 0 },
-      { label: '90+ Days', min: 91, max: Infinity, amount: 0, count: 0 },
-    ];
-    credits.filter((c) => c.status !== 'Clear').forEach((c) => {
-      const issued = new Date(c.dateIssued);
-      const daysDiff = Math.floor((now.getTime() - issued.getTime()) / (1000 * 60 * 60 * 24));
-      const bucket = buckets.find((b) => daysDiff >= b.min && daysDiff <= b.max);
-      if (bucket) {
-        bucket.amount += c.amountOwed;
-        bucket.count += 1;
-      }
-    });
-    return buckets;
-  }, [credits]);
-
-  // Top debtors
-  const topDebtors = useMemo(() =>
-    [...credits].filter((c) => c.status !== 'Clear').sort((a, b) => b.amountOwed - a.amountOwed).slice(0, 10),
-    [credits]
-  );
-
-  // Credit risk by customer (how much of their purchases are on credit)
-  const customerRisk = useMemo(() => {
-    return customers
-      .map((cust) => {
-        const custCredits = credits.filter((c) => c.customerId === cust.id && c.status !== 'Clear');
-        const totalOwed = custCredits.reduce((a, c) => a + c.amountOwed, 0);
-        const overdue = custCredits.filter((c) => c.status === 'Overdue');
-        const overdueAmount = overdue.reduce((a, c) => a + c.amountOwed, 0);
-        const creditRatio = cust.totalSpent > 0 ? pct(totalOwed, cust.totalSpent) : 0;
-        return {
-          name: cust.name,
-          type: cust.type,
-          totalSpent: cust.totalSpent,
-          totalOwed,
-          overdueAmount,
-          creditRatio,
-          overdueCount: overdue.length,
-        };
-      })
-      .filter((c) => c.totalOwed > 0)
-      .sort((a, b) => b.creditRatio - a.creditRatio)
-      .slice(0, 10);
-  }, [customers, credits]);
-
-  // Collection trend (how many credits cleared over time)
-  const collectionData = useMemo(() => {
-    const monthMap: Record<string, { cleared: number; issued: number }> = {};
-    credits.forEach((c) => {
-      const issuedMonth = c.dateIssued.slice(0, 7);
-      if (!monthMap[issuedMonth]) monthMap[issuedMonth] = { cleared: 0, issued: 0 };
-      monthMap[issuedMonth].issued += c.amountOwed;
-      if (c.status === 'Clear') monthMap[issuedMonth].cleared += c.amountOwed;
-    });
-    return Object.entries(monthMap)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([key, data]) => ({
-        month: getMonthLabel(key + '-01'),
-        issued: data.issued,
-        cleared: data.cleared,
-        rate: pct(data.cleared, data.issued),
-      }));
-  }, [credits]);
-
-  const totalOutstanding = credits.filter((c) => c.status !== 'Clear').reduce((a, c) => a + c.amountOwed, 0);
-  const totalOverdue = credits.filter((c) => c.status === 'Overdue').reduce((a, c) => a + c.amountOwed, 0);
-  const totalCleared = credits.filter((c) => c.status === 'Clear').reduce((a, c) => a + c.amountOwed, 0);
-  const collectionRate = pct(totalCleared, totalCleared + totalOutstanding);
+function CreditRisk({ data }: { data: AnalyticsOverviewData['credit'] }) {
+  const {
+    kpis,
+    agingReport,
+    topDebtors,
+    customerRisk,
+    collectionTrend,
+  } = data;
+  const { totalOutstanding, totalOverdue, totalCleared, collectionRate } = kpis;
 
   return (
     <div className="space-y-5">
@@ -1107,7 +806,7 @@ function CreditRisk({ credits, customers, sales }: { credits: any[]; customers: 
       </div>
 
       {/* Collection Trend */}
-      {collectionData.length > 0 && (
+      {collectionTrend.length > 0 && (
         <div className="rounded-xl border bg-card shadow-sm">
           <div className="p-5 border-b">
             <h3 className="text-sm font-bold">Collection Performance</h3>
@@ -1115,7 +814,7 @@ function CreditRisk({ credits, customers, sales }: { credits: any[]; customers: 
           </div>
           <div className="p-5 h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={collectionData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+              <BarChart data={collectionTrend} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                 <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} tickFormatter={(v) => fmtK(v)} />

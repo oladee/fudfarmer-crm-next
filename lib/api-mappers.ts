@@ -352,20 +352,6 @@ export function mapTask(t: ApiTask): Task {
   };
 }
 
-/** Legacy flat credit list for analytics / sidebar */
-export function toLegacyCreditFromSummary(rows: ApiCreditCustomerSummary[]): CreditRecord[] {
-  return rows.map((row) => ({
-    id: row.customer_id,
-    customerId: row.customer_id,
-    customerName: row.customer_name,
-    amountOwed: row.total_outstanding,
-    dateIssued: row.oldest_due_date ? toDateStr(row.oldest_due_date) : '',
-    dueDate: row.oldest_due_date ? toDateStr(row.oldest_due_date) : undefined,
-    status: row.overdue_count > 0 ? 'Overdue' as const : 'Pending' as const,
-    repaymentTimelines: [],
-  }));
-}
-
 export function normalizeDashboardMetrics(
   raw: ApiDashboardMetricsRaw,
   extras: {

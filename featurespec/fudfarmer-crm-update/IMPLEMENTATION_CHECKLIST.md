@@ -84,7 +84,7 @@ Legend: ✅ Done · 🟡 Partial · ⬜ Not started
 | **Interactions** | **✅** (this sprint) |
 | Audit | ✅ |
 | Settings | ✅ |
-| Analytics | 🟡 (hooks/API; no StorageService in page) |
+| Analytics | ✅ (GET /analytics/overview + hub scope) |
 
 ### Phase 6 — Cleanup
 | Item | Status |
@@ -119,4 +119,5 @@ Legend: ✅ Done · 🟡 Partial · ⬜ Not started
 - API mode requires **existing CRM customers** (MongoId) for feedback/compensation creates.
 - Enquiry create sends `customer_email` (placeholder if empty).
 - Compensation API field is `value`; mapper reads `amount` or `value`.
-- Priority escalate remains **local-only** until BE adds priority field + PATCH.
+- Priority escalate: `PATCH /feedbacks/:id/priority` via `useUpdateFeedbackPriority()`.
+- Deleted `lib/credit-store.ts`; analytics uses `GET /analytics/overview`.
