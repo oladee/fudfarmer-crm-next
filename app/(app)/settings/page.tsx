@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, type SubmitEvent } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useAgents, useCreateAgent, useUpdateAgent, useDeleteAgent,
@@ -20,6 +20,20 @@ import {
   isCompanyAdminRole,
   roleLabel,
 } from '@/lib/role-permissions';
+import {
+  ROLE_COLOR_MAP,
+  countGroupPermissions,
+  formatHubCountLabel,
+  getConfirmActionMessage,
+  getPasswordStrength,
+  getPasswordStrengthTextClass,
+  getPermissionGroupCheckboxClass,
+  isCompanyAdminSelection,
+  resolveRoleId,
+  resolveUserHubId,
+  runConfirmAction,
+  validateUserSave,
+} from '@/lib/settings-helpers';
 import { ApiRole } from '@/types/api';
 import { Agent, Hub } from '@/types';
 import { toast } from 'sonner';
@@ -97,9 +111,7 @@ export default function SettingsPage() {
     () => systemRoles.find((r) => r._id === selectedRoleId) ?? systemRoles[0],
     [systemRoles, selectedRoleId],
   );
-  const selectedRoleLabel = (selectedRoleRecord
-    ? roleLabel(selectedRoleRecord)
-    : 'Hub Manager') as RoleName;
+  const selectedRoleLabel = selectedRoleRecord ? roleLabel(selectedRoleRecord) : 'Hub Manager';
 
   const syncRolesFromApi = useCallback(() => {
     if (!HAS_API || apiRoles.length === 0) return;
@@ -127,7 +139,7 @@ export default function SettingsPage() {
   }, [user]);
 
   // ── Profile ──
-  const handleProfileUpdate = async (e: React.FormEvent) => {
+  const handleProfileUpdate = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!name.trim()) {
       toast.error('Name is required.');
@@ -143,7 +155,7 @@ export default function SettingsPage() {
         full_name: name.trim(),
         phone: phone.trim(),
       });
-      await refetchUser();
+      refetchUser();
       toast.success('Profile updated.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update profile.');
@@ -152,7 +164,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handlePasswordUpdate = async (e: React.FormEvent) => {
+  const handlePasswordUpdate = async (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!currentPassword) { toast.error('Enter your current password.'); return; }
     if (!newPassword || newPassword.length < 8) { toast.error('New password must be at least 8 characters.'); return; }
@@ -176,49 +188,49 @@ export default function SettingsPage() {
     else { document.documentElement.classList.remove('dark'); localStorage.setItem('fudfarmer_theme', 'light'); }
   };
 
-  const resolveRoleId = (roleLabelName: string) =>
-    apiRoles.find((r) => r.label === roleLabelName || r.name === roleLabelName.replace(/\s+/g, '_').toLowerCase())?._id;
-
-  const resolveHubId = (hubName: string) => hubs.find((h) => h.name === hubName)?.id;
-
-  const isCompanyAdminSelection = (roleLabelName: string) =>
-    roleLabelName === 'Company Admin' || apiRoles.some((r) => r.label === roleLabelName && r.name === 'company_admin');
+  const isAdminRole = (roleLabelName: string) => isCompanyAdminSelection(apiRoles, roleLabelName);
 
   // ── Users ──
   const handleSaveUser = async () => {
-    if (!editingUser.name || !editingUser.email) { toast.error('Name and email required.'); return; }
-    const roleId = resolveRoleId(editingUser.role as string);
-    if (HAS_API && !roleId) { toast.error('Invalid role selected.'); return; }
-    const hubId = !isCompanyAdminSelection(editingUser.role as string)
-      ? (canSwitchHubs ? resolveHubId(editingUser.location || '') : scopeHubId)
-      : undefined;
-    if (HAS_API && !isCompanyAdminSelection(editingUser.role as string) && !hubId) {
-      toast.error('Hub is required for this role.');
+    const roleLabelName = editingUser.role ?? 'Hub Manager';
+    const roleId = resolveRoleId(apiRoles, roleLabelName);
+    const hubId = resolveUserHubId(apiRoles, roleLabelName, editingUser.location, canSwitchHubs, scopeHubId ?? undefined, hubs);
+    const validationError = validateUserSave(editingUser, HAS_API, roleId, hubId, isAdminRole(roleLabelName));
+    if (validationError) {
+      toast.error(validationError);
       return;
     }
+
+    const userName = editingUser.name ?? '';
+    const userEmail = editingUser.email ?? '';
+
     try {
       if (editingUser.id) {
         await updateAgent.mutateAsync({
           id: editingUser.id,
-          full_name: editingUser.name,
-          email: editingUser.email,
+          full_name: userName,
+          email: userEmail,
           phone: editingUser.phone || '',
           ...(roleId ? { role_id: roleId } : {}),
-          ...(hubId !== undefined ? { hub_id: hubId ?? undefined } : {}),
+          ...(hubId === undefined ? {} : { hub_id: hubId }),
         });
+        toast.success('User saved.');
       } else {
+        if (!roleId) {
+          toast.error('Invalid role selected.');
+          return;
+        }
         await createAgent.mutateAsync({
-          full_name: editingUser.name!,
-          email: editingUser.email!,
+          full_name: userName,
+          email: userEmail,
           phone: editingUser.phone || '',
-          role_id: roleId!,
-          hub_id: hubId ?? undefined,
+          role_id: roleId,
+          hub_id: hubId,
         });
         toast.success('User created. A welcome email with login details was sent.');
       }
       setShowUserModal(false);
       setEditingUser({ role: 'Hub Manager', location: activeHubs[0]?.name || user?.hubName || 'Lagos' });
-      if (editingUser.id) toast.success('User saved.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save user.');
     }
@@ -236,21 +248,23 @@ export default function SettingsPage() {
     if (duplicate) { toast.error('A hub with that name already exists.'); return; }
 
     try {
+      const hubManager = editingHub.hubManagerId || null;
       if (editingHub.id) {
         await updateHub.mutateAsync({
           id: editingHub.id,
           hub_name: editingHub.name,
           hub_address: editingHub.address,
           hub_phone: editingHub.phone,
-          manager_name: editingHub.managerName,
+          hub_manager: hubManager,
           is_active: editingHub.isActive,
         });
       } else {
+        const hubName = editingHub.name ?? '';
         await createHub.mutateAsync({
-          hub_name: editingHub.name!,
+          hub_name: hubName,
           hub_address: editingHub.address,
           hub_phone: editingHub.phone,
-          manager_name: editingHub.managerName,
+          hub_manager: hubManager || undefined,
           is_active: editingHub.isActive !== false,
         });
       }
@@ -327,7 +341,6 @@ export default function SettingsPage() {
   };
 
   const selectedPerms = rolePerms[rolePermKey] || [];
-  const permCount = selectedPerms.length;
   const totalPerms = PERMISSION_GROUPS.reduce((sum, g) => sum + g.permissions.length, 0);
   const isAdminRoleSelected = selectedRoleRecord
     ? isCompanyAdminRole(selectedRoleRecord)
@@ -341,61 +354,31 @@ export default function SettingsPage() {
     [systemRoles],
   );
 
-  // ── Confirm action executor ──
   const executeConfirmAction = async () => {
     if (!confirmAction) return;
     try {
-      if (confirmAction.type === 'deleteUser' && confirmAction.payload) {
-        await deleteAgent.mutateAsync(confirmAction.payload);
-        toast.success('User deleted.');
-      } else if (confirmAction.type === 'deleteHub' && confirmAction.payload) {
-        await deleteHub.mutateAsync(confirmAction.payload);
-        toast.success('Hub deleted.');
-      } else if (confirmAction.type === 'resetData') {
-        toast.error('Local demo data reset is no longer available. Use the API-backed environment.');
-      } else if (confirmAction.type === 'resetRoles') {
-        if (!HAS_API) {
-          toast.error('Connect to the API to reset role permissions.');
-        } else {
-          for (const role of systemRoles) {
-            if (isCompanyAdminRole(role)) continue;
-            await updateRole.mutateAsync({
-              id: role._id,
-              permissions: fePermissionsToApiInput(defaultPermissionsForRoleLabel(role.label)),
-            });
-          }
-          syncRolesFromApi();
-          setRolesDirty(false);
-          toast.success('All role permissions reset to defaults.');
-        }
-      }
+      await runConfirmAction(confirmAction, {
+        hasApi: HAS_API,
+        systemRoles,
+        onDeleteUser: (id) => deleteAgent.mutateAsync(id),
+        onDeleteHub: (id) => deleteHub.mutateAsync(id),
+        onUpdateRole: (id, permissions) => updateRole.mutateAsync({ id, permissions }),
+        syncRolesFromApi,
+        setRolesDirty,
+        defaultPermissionsForRoleLabel,
+        fePermissionsToApiInput,
+        isCompanyAdminRole,
+      });
+      if (confirmAction.type === 'deleteUser') toast.success('User deleted.');
+      else if (confirmAction.type === 'deleteHub') toast.success('Hub deleted.');
+      else if (confirmAction.type === 'resetRoles') toast.success('All role permissions reset to defaults.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Action failed.');
     }
     setConfirmAction(null);
   };
 
-  const getPasswordStrength = (password: string): { label: string; color: string; width: string } => {
-    if (!password) return { label: '', color: '', width: 'w-0' };
-    let score = 0;
-    if (password.length >= 6) score++;
-    if (password.length >= 10) score++;
-    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score++;
-    if (/\d/.test(password)) score++;
-    if (/[^a-zA-Z0-9]/.test(password)) score++;
-    if (score <= 2) return { label: 'Weak', color: 'bg-destructive', width: 'w-1/3' };
-    if (score <= 3) return { label: 'Medium', color: 'bg-yellow-500', width: 'w-2/3' };
-    return { label: 'Strong', color: 'bg-green-500', width: 'w-full' };
-  };
-
   const passwordStrength = getPasswordStrength(newPassword);
-
-  const roleColorMap: Record<RoleName, string> = {
-    'Company Admin': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-    'Hub Manager': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-    'Finance': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-    'Customer Success': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-  };
 
   const tabs = ['Profile', 'Users', 'Hubs', 'Roles & Permissions', 'Preferences', 'Data'] as const;
 
@@ -416,15 +399,15 @@ export default function SettingsPage() {
           <form onSubmit={handleProfileUpdate} className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
             <h3 className="font-bold flex items-center gap-2"><User size={18} /> Profile Information</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2"><label className={labelCls}>Full Name</label><input type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} /></div>
-              <div className="space-y-2"><label className={labelCls}>Email</label><input type="email" value={email} readOnly disabled className={`${inputCls} opacity-70 cursor-not-allowed`} title="Email is managed by your administrator" /></div>
-              <div className="space-y-2"><label className={labelCls}>Phone</label><input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputCls} /></div>
-              <div className="space-y-2"><label className={labelCls}>Hub</label>
-                <input type="text" value={location || '—'} readOnly disabled className={`${inputCls} opacity-70 cursor-not-allowed`} title="Hub is assigned by your administrator" />
+              <div className="space-y-2"><label htmlFor="profile-name" className={labelCls}>Full Name</label><input id="profile-name" type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} /></div>
+              <div className="space-y-2"><label htmlFor="profile-email" className={labelCls}>Email</label><input id="profile-email" type="email" value={email} readOnly disabled className={`${inputCls} opacity-70 cursor-not-allowed`} title="Email is managed by your administrator" /></div>
+              <div className="space-y-2"><label htmlFor="profile-phone" className={labelCls}>Phone</label><input id="profile-phone" type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputCls} /></div>
+              <div className="space-y-2"><label htmlFor="profile-hub" className={labelCls}>Hub</label>
+                <input id="profile-hub" type="text" value={location || '—'} readOnly disabled className={`${inputCls} opacity-70 cursor-not-allowed`} title="Hub is assigned by your administrator" />
               </div>
             </div>
             <div className="flex items-center gap-3 pt-2">
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${roleColorMap[user?.role as RoleName] || 'bg-muted'}`}>{user?.role}</span>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${ROLE_COLOR_MAP[user?.role as RoleName] || 'bg-muted'}`}>{user?.role}</span>
               <span className="text-xs text-muted-foreground">Role assigned by Company Admin</span>
             </div>
             <button type="submit" disabled={loading} className={btnPrimary}><Save size={14} className="mr-2" /> Save Changes</button>
@@ -433,9 +416,9 @@ export default function SettingsPage() {
           <form onSubmit={handlePasswordUpdate} className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
             <h3 className="font-bold flex items-center gap-2"><Lock size={18} /> Change Password</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2 md:col-span-2"><label className={labelCls}>Current Password</label><input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className={inputCls} autoComplete="current-password" /></div>
-              <div className="space-y-2"><label className={labelCls}>New Password</label><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={inputCls} autoComplete="new-password" />{newPassword && (<div className="mt-2 space-y-1"><div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full transition-all duration-300 ${passwordStrength.color} ${passwordStrength.width}`} /></div><p className={`text-xs font-medium ${passwordStrength.color === 'bg-destructive' ? 'text-destructive' : passwordStrength.color === 'bg-yellow-500' ? 'text-yellow-600 dark:text-yellow-400' : 'text-green-600 dark:text-green-400'}`}>{passwordStrength.label}</p></div>)}</div>
-              <div className="space-y-2"><label className={labelCls}>Confirm Password</label><input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={inputCls} autoComplete="new-password" /></div>
+              <div className="space-y-2 md:col-span-2"><label htmlFor="current-password" className={labelCls}>Current Password</label><input id="current-password" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className={inputCls} autoComplete="current-password" /></div>
+              <div className="space-y-2"><label htmlFor="new-password" className={labelCls}>New Password</label><input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={inputCls} autoComplete="new-password" />{newPassword && (<div className="mt-2 space-y-1"><div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full transition-all duration-300 ${passwordStrength.color} ${passwordStrength.width}`} /></div><p className={`text-xs font-medium ${getPasswordStrengthTextClass(passwordStrength.color)}`}>{passwordStrength.label}</p></div>)}</div>
+              <div className="space-y-2"><label htmlFor="confirm-password" className={labelCls}>Confirm Password</label><input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={inputCls} autoComplete="new-password" /></div>
             </div>
             <button type="submit" disabled={loading || !HAS_API} className={btnPrimary}><Lock size={14} className="mr-2" /> Update Password</button>
             {!HAS_API && <p className="text-xs text-muted-foreground">Connect to the API to change your password.</p>}
@@ -458,7 +441,7 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium">{agent.name}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${roleColorMap[agent.role] || 'bg-muted'}`}>{agent.role}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_COLOR_MAP[agent.role] || 'bg-muted'}`}>{agent.role}</span>
                       <span className="text-xs text-muted-foreground">{agent.email} &middot; {agent.location}</span>
                     </div>
                   </div>
@@ -482,7 +465,7 @@ export default function SettingsPage() {
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold flex items-center gap-2"><Building2 size={18} /> Hub Locations</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{activeHubs.length} active hub{activeHubs.length !== 1 ? 's' : ''} &middot; {hubs.length} total</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{formatHubCountLabel(activeHubs.length, hubs.length)}</p>
               </div>
               {canManageHubs && <button onClick={() => { setEditingHub({ isActive: true }); setShowHubModal(true); }} className={btnPrimary}><Plus size={14} className="mr-2" /> Add Hub</button>}
             </div>
@@ -542,12 +525,7 @@ export default function SettingsPage() {
       {/* ══════ ROLES & PERMISSIONS TAB ══════ */}
       {activeTab === 'Roles & Permissions' && (
         <div className="space-y-5">
-          {!HAS_API ? (
-            <div className="rounded-xl border bg-card p-6 shadow-sm text-center">
-              <Shield size={32} className="mx-auto text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">Connect to the API to manage roles and permissions.</p>
-            </div>
-          ) : (
+          {HAS_API ? (
         <>
           {/* Role selector */}
           <div className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
@@ -576,7 +554,7 @@ export default function SettingsPage() {
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${roleColorMap[role.label].split(' ')[0]}`} />
+                      <span className={`h-2 w-2 rounded-full ${ROLE_COLOR_MAP[role.label].split(' ')[0]}`} />
                       <span>{role.label}</span>
                       <span className="text-[10px] text-muted-foreground font-normal">{count}/{totalPerms}</span>
                     </div>
@@ -606,31 +584,34 @@ export default function SettingsPage() {
                 return (
                   <div key={group.label}>
                     {/* Group header */}
-                    <div
-                      className="flex items-center justify-between px-5 py-3.5 cursor-pointer hover:bg-accent/50 transition-colors"
-                      onClick={() => toggleGroup(group.label)}
-                    >
-                      <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-between px-5 py-3.5">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
                         <button
-                          onClick={(e) => { e.stopPropagation(); toggleAllInGroup(group); }}
+                          type="button"
+                          onClick={() => toggleAllInGroup(group)}
                           disabled={isAdminRoleSelected}
-                          className={`h-5 w-5 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${
-                            allSelected
-                              ? 'bg-primary border-primary text-white'
-                              : someSelected
-                              ? 'border-primary bg-primary/20'
-                              : 'border-muted-foreground/30 hover:border-primary'
-                          } ${isAdminRoleSelected ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className={getPermissionGroupCheckboxClass(allSelected, someSelected, isAdminRoleSelected)}
                         >
                           {allSelected && <Check size={12} strokeWidth={3} />}
                           {someSelected && !allSelected && <div className="h-0.5 w-2 bg-primary rounded" />}
                         </button>
-                        <div>
+                        <button
+                          type="button"
+                          className="flex flex-1 items-center gap-2 text-left hover:bg-accent/50 rounded-md py-1 -my-1 px-1 -mx-1"
+                          onClick={() => toggleGroup(group.label)}
+                        >
                           <span className="font-semibold text-sm">{group.label}</span>
-                          <span className="text-xs text-muted-foreground ml-2">{selectedCount}/{groupPerms.length}</span>
-                        </div>
+                          <span className="text-xs text-muted-foreground">{selectedCount}/{groupPerms.length}</span>
+                        </button>
                       </div>
-                      {isExpanded ? <ChevronDown size={16} className="text-muted-foreground" /> : <ChevronRight size={16} className="text-muted-foreground" />}
+                      <button
+                        type="button"
+                        className="shrink-0 p-1 text-muted-foreground hover:text-foreground"
+                        onClick={() => toggleGroup(group.label)}
+                        aria-label={isExpanded ? 'Collapse group' : 'Expand group'}
+                      >
+                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
                     </div>
 
                     {/* Individual permissions */}
@@ -688,6 +669,11 @@ export default function SettingsPage() {
             </div>
           )}
         </>
+          ) : (
+            <div className="rounded-xl border bg-card p-6 shadow-sm text-center">
+              <Shield size={32} className="mx-auto text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">Connect to the API to manage roles and permissions.</p>
+            </div>
           )}
         </div>
       )}
@@ -727,17 +713,18 @@ export default function SettingsPage() {
           <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold">{editingUser.id ? 'Edit User' : 'Add User'}</h2><button onClick={() => setShowUserModal(false)}><X size={20} /></button></div>
             <div className="space-y-4">
-              <div className="space-y-2"><label className={labelCls}>Name *</label><input type="text" value={editingUser.name || ''} onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })} className={inputCls} /></div>
-              <div className="space-y-2"><label className={labelCls}>Email *</label><input type="email" value={editingUser.email || ''} onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })} className={inputCls} /></div>
-              <div className="space-y-2"><label className={labelCls}>Phone</label><input type="text" value={editingUser.phone || ''} onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })} className={inputCls} /></div>
+              <div className="space-y-2"><label htmlFor="user-name" className={labelCls}>Name *</label><input id="user-name" type="text" value={editingUser.name || ''} onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })} className={inputCls} /></div>
+              <div className="space-y-2"><label htmlFor="user-email" className={labelCls}>Email *</label><input id="user-email" type="email" value={editingUser.email || ''} onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })} className={inputCls} /></div>
+              <div className="space-y-2"><label htmlFor="user-phone" className={labelCls}>Phone</label><input id="user-phone" type="text" value={editingUser.phone || ''} onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })} className={inputCls} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><label className={labelCls}>Role</label><select value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as Agent['role'] })} className={inputCls} disabled={!canSwitchHubs && !!editingUser.id}><option>Company Admin</option><option>Hub Manager</option><option>Finance</option><option>Customer Success</option></select></div>
-                <div className="space-y-2"><label className={labelCls}>Hub</label>
+                <div className="space-y-2"><label htmlFor="user-role" className={labelCls}>Role</label><select id="user-role" value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as Agent['role'] })} className={inputCls} disabled={!canSwitchHubs && !!editingUser.id}><option>Company Admin</option><option>Hub Manager</option><option>Finance</option><option>Customer Success</option></select></div>
+                <div className="space-y-2"><label htmlFor="user-hub" className={labelCls}>Hub</label>
                   <select
+                    id="user-hub"
                     value={editingUser.location}
                     onChange={(e) => setEditingUser({ ...editingUser, location: e.target.value })}
                     className={inputCls}
-                    disabled={!canSwitchHubs || isCompanyAdminSelection(editingUser.role as string)}
+                    disabled={!canSwitchHubs || isAdminRole(editingUser.role ?? '')}
                   >
                     {(canSwitchHubs ? activeHubs : hubs.filter((h) => h.id === scopeHubId || h.name === user?.hubName)).map((h) => (
                       <option key={h.id} value={h.name}>{h.name}</option>
@@ -751,9 +738,9 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-1">
                   {PERMISSION_GROUPS.map((group) => {
                     const groupPerms = group.permissions.map((p) => p.key);
-                    const previewKey = resolveRoleId(editingUser.role as string) ?? '';
+                    const previewKey = resolveRoleId(apiRoles, editingUser.role ?? '') ?? '';
                     const rp = rolePerms[previewKey] || [];
-                    const count = groupPerms.filter((k) => rp.includes(k as Permission)).length;
+                    const count = countGroupPermissions(groupPerms, rp);
                     if (count === 0) return null;
                     return (
                       <span key={group.label} className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${count === groupPerms.length ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
@@ -782,21 +769,31 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className={labelCls}>Hub Name *</label>
-                <input type="text" value={editingHub.name || ''} onChange={(e) => setEditingHub({ ...editingHub, name: e.target.value })} placeholder="e.g. Abuja" className={inputCls} />
+                <label htmlFor="hub-name" className={labelCls}>Hub Name *</label>
+                <input id="hub-name" type="text" value={editingHub.name || ''} onChange={(e) => setEditingHub({ ...editingHub, name: e.target.value })} placeholder="e.g. Abuja" className={inputCls} />
               </div>
               <div className="space-y-2">
-                <label className={labelCls}>Address</label>
-                <input type="text" value={editingHub.address || ''} onChange={(e) => setEditingHub({ ...editingHub, address: e.target.value })} placeholder="Full address" className={inputCls} />
+                <label htmlFor="hub-address" className={labelCls}>Address</label>
+                <input id="hub-address" type="text" value={editingHub.address || ''} onChange={(e) => setEditingHub({ ...editingHub, address: e.target.value })} placeholder="Full address" className={inputCls} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className={labelCls}>Phone</label>
-                  <input type="text" value={editingHub.phone || ''} onChange={(e) => setEditingHub({ ...editingHub, phone: e.target.value })} placeholder="Hub phone" className={inputCls} />
+                  <label htmlFor="hub-phone" className={labelCls}>Phone</label>
+                  <input id="hub-phone" type="text" value={editingHub.phone || ''} onChange={(e) => setEditingHub({ ...editingHub, phone: e.target.value })} placeholder="Hub phone" className={inputCls} />
                 </div>
                 <div className="space-y-2">
-                  <label className={labelCls}>Manager</label>
-                  <input type="text" value={editingHub.managerName || ''} onChange={(e) => setEditingHub({ ...editingHub, managerName: e.target.value })} placeholder="Manager name" className={inputCls} />
+                  <label htmlFor="hub-manager" className={labelCls}>Manager</label>
+                  <select
+                    id="hub-manager"
+                    value={editingHub.hubManagerId || ''}
+                    onChange={(e) => setEditingHub({ ...editingHub, hubManagerId: e.target.value || undefined })}
+                    className={inputCls}
+                  >
+                    <option value="">No manager</option>
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>{agent.name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -823,13 +820,7 @@ export default function SettingsPage() {
               <div>
                 <h3 className="text-lg font-semibold">Are you sure?</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {confirmAction.type === 'deleteUser'
-                    ? 'This will permanently delete this user. This action cannot be undone.'
-                    : confirmAction.type === 'deleteHub'
-                    ? 'This will permanently delete this hub. Ensure no team members, inventory, or customers are assigned to it.'
-                    : confirmAction.type === 'resetRoles'
-                    ? 'This will reset all role permissions to their factory defaults. Any custom changes will be lost.'
-                    : 'This will erase all CRM data and restore factory defaults. This action cannot be undone.'}
+                  {getConfirmActionMessage(confirmAction.type)}
                 </p>
               </div>
               <div className="flex gap-3 w-full">

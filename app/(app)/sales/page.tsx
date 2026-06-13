@@ -6,20 +6,21 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeSelect } from '@/components/hub-scope-filter';
 import {
-  useSales, useCreateSale, useUpdateSale, useUpdateSaleStatus, useUpdateDeliveryStatus, useVoidSale,
+  useSales, useCreateSale, useUpdateSale, useUpdateDeliveryStatus, useVoidSale,
   useCustomers, useAgents, useInventory, useStockLogs, useCreditSummary, useHubs,
 } from '@/hooks/use-queries';
 import { Sale, PaymentTerms, SalesChannel, DeliveryStatus, PaymentType, PaymentMode } from '@/types';
 import { toast } from 'sonner';
 import {
-  Plus, Banknote, Search, TrendingUp, TrendingDown, X, Package, Percent, CreditCard,
-  MapPin, AlertTriangle, FileText, Truck, ChevronRight, Edit3, Save, Trash2,
+  Plus, Banknote, Search, TrendingUp, X, Package, CreditCard,
+  MapPin, AlertTriangle, Truck, ChevronRight, Edit3, Save, Trash2,
   ArrowUpRight, ArrowDownRight, Calendar, Upload, Download, ShoppingCart, Users,
-  Eye, Check, Clock, ArrowRightLeft, BarChart3, Filter,
+  Check, Clock, ArrowRightLeft, BarChart3,
 } from 'lucide-react';
 
 type DetailTab = 'overview' | 'delivery' | 'history';
 type QuickDatePreset = 'today' | 'week' | 'month' | '30days' | 'all';
+type SaleDateFieldFilter = 'sold' | 'created';
 
 const NAIRA = '\u20A6';
 const fmt = (n: number) => `${NAIRA}${n.toLocaleString()}`;
@@ -43,18 +44,142 @@ function getDateRange(preset: QuickDatePreset): { from: string; to: string } {
   return { from: d.toISOString().split('T')[0], to };
 }
 
+const HUB_PREFIX_RE = /^\[([^\]]+)\]/;
+
 function extractHub(productDetails?: string): string | null {
   if (!productDetails) return null;
-  const m = productDetails.match(/^\[([^\]]+)\]/);
-  return m ? m[1] : null;
+  const match = HUB_PREFIX_RE.exec(productDetails);
+  return match?.[1] ?? null;
+}
+
+function statusColor(s: string): string {
+  if (s === 'Paid') return 'bg-green-100 text-green-800';
+  if (s === 'Approved') return 'bg-blue-100 text-blue-800';
+  if (s === 'Voided') return 'bg-red-100 text-red-800';
+  return 'bg-yellow-100 text-yellow-800';
+}
+
+function paymentModeBadgeClass(mode: PaymentMode): string {
+  if (mode === PaymentMode.FULL_PAYMENT) return 'bg-green-100 text-green-800';
+  if (mode === PaymentMode.FULL_CREDIT) return 'bg-orange-100 text-orange-800';
+  return 'bg-yellow-100 text-yellow-800';
+}
+
+function paymentModeLabel(mode: PaymentMode): string {
+  if (mode === PaymentMode.FULL_PAYMENT) return 'Paid';
+  if (mode === PaymentMode.FULL_CREDIT) return 'Credit';
+  return 'Partial';
+}
+
+function resolveSalePaymentMode(sale: Sale, paid: number): PaymentMode {
+  if (sale.paymentMode) return sale.paymentMode as PaymentMode;
+  if (!sale.isCredit) return PaymentMode.FULL_PAYMENT;
+  return paid > 0 ? PaymentMode.PARTIAL_CREDIT : PaymentMode.FULL_CREDIT;
+}
+
+function getAmountPaidForMode(paymentMode: PaymentMode, amount: number, amountPaid: number): number {
+  if (paymentMode === PaymentMode.FULL_PAYMENT) return amount;
+  if (paymentMode === PaymentMode.FULL_CREDIT) return 0;
+  return amountPaid;
+}
+
+function creditWarningText(row: { totalOutstanding: number; overdueCount: number }): string {
+  const itemLabel = row.overdueCount === 1 ? 'item' : 'items';
+  if (row.overdueCount > 0) {
+    return `Overdue credit: ${fmt(row.totalOutstanding)} (${row.overdueCount} ${itemLabel})`;
+  }
+  return `Outstanding credit: ${fmt(row.totalOutstanding)}`;
+}
+
+function saleCountLabel(count: number): string {
+  return `${count} sale${count === 1 ? '' : 's'}`;
+}
+
+function escapeCsvCell(value: unknown): string {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function parseCsvLine(line: string): string[] {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  values.push(current.trim());
+  return values;
+}
+
+type CsvPreviewRow = { lineNo: number; [column: string]: string | number };
+
+async function parseCsvFile(file: File): Promise<{ rows: CsvPreviewRow[]; errors: string[] }> {
+  const text = await file.text();
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) {
+    return { rows: [], errors: ['CSV must have a header row and at least one data row.'] };
+  }
+
+  const headers = parseCsvLine(lines[0]).map((h) => h.replaceAll(/^"|"$/g, '').trim().toLowerCase());
+  const requiredHeaders = ['date', 'customer', 'amount'];
+  const missing = requiredHeaders.filter((h) => !headers.includes(h));
+  if (missing.length > 0) {
+    return { rows: [], errors: [`Missing required columns: ${missing.join(', ')}. Required: date, customer, amount`] };
+  }
+
+  const rows: CsvPreviewRow[] = [];
+  const errors: string[] = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const values = parseCsvLine(lines[i]).map((v) => v.replaceAll(/^"|"$/g, '').replaceAll('""', '"').trim());
+    const row: Record<string, string> = {};
+    headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
+    if (!row.date || !row.customer || !row.amount) {
+      errors.push(`Row ${i + 1}: Missing date, customer, or amount.`);
+      continue;
+    }
+    if (Number.isNaN(Number(row.amount))) {
+      errors.push(`Row ${i + 1}: Amount "${row.amount}" is not a number.`);
+      continue;
+    }
+    rows.push({ ...row, lineNo: i + 1 });
+  }
+  return { rows, errors };
+}
+
+function handleOverlayKeyDown(e: React.KeyboardEvent, onClose: () => void) {
+  if (e.key === 'Escape') onClose();
 }
 
 export default function SalesPage() {
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
   const hubScope = useHubScopeFilter();
-  const { data: sales = [] } = useSales({ hub_id: hubScope.hubIdForApi });
-  const { data: customers = [] } = useCustomers({ hub_id: hubScope.hubIdForApi });
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [dateFieldFilter, setDateFieldFilter] = useState<SaleDateFieldFilter>('sold');
+  const [quickPreset, setQuickPreset] = useState<QuickDatePreset>('all');
+
+  const salesApiFilters = useMemo(() => ({
+    hub_id: hubScope.hubIdForApi,
+    ...(dateFrom ? { date_from: dateFrom } : {}),
+    ...(dateTo ? { date_to: dateTo } : {}),
+    ...(dateFrom || dateTo ? { date_field: dateFieldFilter } : {}),
+  }), [hubScope.hubIdForApi, dateFrom, dateTo, dateFieldFilter]);
+
+  const { data: sales = [] } = useSales(salesApiFilters);
+  const { data: customers = [] } = useCustomers();
   const { data: agents = [] } = useAgents();
   const { data: inventory = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
   const { data: stockLogs = [] } = useStockLogs();
@@ -63,7 +188,6 @@ export default function SalesPage() {
   const activeHubs = hubs.filter(h => h.isActive);
   const createSale = useCreateSale();
   const updateSale = useUpdateSale();
-  const updateSaleStatus = useUpdateSaleStatus();
   const updateDeliveryStatusMutation = useUpdateDeliveryStatus();
   const voidSale = useVoidSale();
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -73,9 +197,6 @@ export default function SalesPage() {
   const [filterAgent, setFilterAgent] = useState('All');
   const [filterStatus, setFilterStatus] = useState('All');
   const [filterChannel, setFilterChannel] = useState<string>('All');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [quickPreset, setQuickPreset] = useState<QuickDatePreset>('all');
 
   // ── Add sale modal ──
   const [showAddModal, setShowAddModal] = useState(false);
@@ -105,7 +226,7 @@ export default function SalesPage() {
 
   // ── CSV import ──
   const [showImportModal, setShowImportModal] = useState(false);
-  const [csvPreview, setCsvPreview] = useState<Record<string, string>[]>([]);
+  const [csvPreview, setCsvPreview] = useState<CsvPreviewRow[]>([]);
   const [csvErrors, setCsvErrors] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
 
@@ -128,8 +249,7 @@ export default function SalesPage() {
     if (!newSale.customerId) return null;
     const row = creditSummary.find((cr) => cr.customerId === newSale.customerId);
     if (!row || row.totalOutstanding <= 0) return null;
-    if (row.overdueCount > 0) return `Overdue credit: ${fmt(row.totalOutstanding)} (${row.overdueCount} item${row.overdueCount !== 1 ? 's' : ''})`;
-    return `Outstanding credit: ${fmt(row.totalOutstanding)}`;
+    return creditWarningText(row);
   }, [newSale.customerId, creditSummary]);
 
   // Customer context for form
@@ -139,7 +259,8 @@ export default function SalesPage() {
     if (!c) return null;
     const custSales = sales.filter((s) => s.customerId === c.id && s.status !== 'Voided');
     const avgOrder = custSales.length > 0 ? custSales.reduce((a, s) => a + s.amount, 0) / custSales.length : 0;
-    const lastSale = custSales.length > 0 ? custSales.sort((a, b) => b.date.localeCompare(a.date))[0]?.date : null;
+    const sorted = custSales.toSorted((a, b) => b.date.localeCompare(a.date));
+    const lastSale = sorted.length > 0 ? sorted[0]?.date : null;
     const credit = creditSummary.find((cr) => cr.customerId === c.id);
     return { ...c, avgOrder, lastSale, credit };
   }, [newSale.customerId, customers, sales, creditSummary]);
@@ -152,6 +273,11 @@ export default function SalesPage() {
     setDateTo(to);
   };
 
+  const resolveHubId = useCallback((hubName: string) => {
+    const hub = activeHubs.find((h) => h.name === hubName) ?? hubs.find((h) => h.name === hubName);
+    return hub?.id;
+  }, [activeHubs, hubs]);
+
   // ── Filtered sales ──
   const filteredSales = useMemo(() => sales.filter((s) => {
     if (s.status === 'Voided') return filterStatus === 'Voided';
@@ -160,17 +286,15 @@ export default function SalesPage() {
     const matchStatus = filterStatus === 'All' || s.status === filterStatus;
     const matchHub = hubScope.matchesHub(extractHub(s.productDetails) ?? undefined);
     const matchChannel = filterChannel === 'All' || s.channel === filterChannel;
-    const matchDateFrom = !dateFrom || s.date >= dateFrom;
-    const matchDateTo = !dateTo || s.date <= dateTo;
-    return matchSearch && matchAgent && matchStatus && matchHub && matchChannel && matchDateFrom && matchDateTo;
-  }), [sales, searchTerm, filterAgent, filterStatus, hubScope, filterChannel, dateFrom, dateTo]);
+    return matchSearch && matchAgent && matchStatus && matchHub && matchChannel;
+  }), [sales, searchTerm, filterAgent, filterStatus, hubScope, filterChannel]);
 
-  const hasFilters = searchTerm || filterAgent !== 'All' || filterStatus !== 'All' || hubScope.filterHub !== 'All' || filterChannel !== 'All' || dateFrom || dateTo;
+  const hasFilters = searchTerm || filterAgent !== 'All' || filterStatus !== 'All' || hubScope.filterHub !== 'All' || filterChannel !== 'All' || dateFrom || dateTo || dateFieldFilter !== 'sold';
 
   const clearFilters = () => {
     setSearchTerm(''); setFilterAgent('All'); setFilterStatus('All');
     hubScope.setFilterHub(hubScope.canSwitchHubs ? 'All' : hubScope.hubName);
-    setFilterChannel('All'); setDateFrom(''); setDateTo(''); setQuickPreset('all');
+    setFilterChannel('All'); setDateFrom(''); setDateTo(''); setDateFieldFilter('sold'); setQuickPreset('all');
   };
 
   // ── KPI computations ──
@@ -223,19 +347,21 @@ export default function SalesPage() {
     setTouched({ customerId: true, productId: true, quantity: true, dueDate: true });
     if (!isFormValid) { toast.error('Please fix validation errors.'); return; }
 
-    const customer = customers.find((c) => c.id === newSale.customerId);
     const inventoryItem = inventory.find((i) => i.id === selectedProductId);
     if (!inventoryItem || inventoryItem.currentStock < quantity) { toast.error(`Insufficient stock in ${selectedHub}.`); return; }
 
     const amount = Number(newSale.amount);
-    const profitMargin = Number(newSale.profitMargin) || 0;
-    const profitAmount = (amount * profitMargin) / 100;
+    const profitMargin = isAdmin ? (Number(newSale.profitMargin) || 0) : 0;
+    const profitAmount = isAdmin ? (amount * profitMargin) / 100 : 0;
     const saleDate = newSale.date || new Date().toISOString().split('T')[0];
-    const finalAmountPaid = paymentMode === PaymentMode.FULL_PAYMENT ? amount : paymentMode === PaymentMode.FULL_CREDIT ? 0 : amountPaid;
+    const finalAmountPaid = getAmountPaidForMode(paymentMode, amount, amountPaid);
     const isCreditMode = paymentMode !== PaymentMode.FULL_PAYMENT;
+    const hubId = resolveHubId(selectedHub);
+    if (!hubId) { toast.error('Invalid fulfillment hub.'); return; }
 
     createSale.mutate({
       customer_id: newSale.customerId!,
+      hub_id: hubId,
       amount,
       amount_paid: finalAmountPaid,
       payment_mode: paymentMode,
@@ -246,8 +372,7 @@ export default function SalesPage() {
       delivery_status: newSale.deliveryStatus || DeliveryStatus.NOT_APPLICABLE,
       delivery_address: newSale.deliveryAddress,
       notes: newSale.notes || undefined,
-      profit_margin: profitMargin,
-      profit_amount: profitAmount,
+      ...(isAdmin ? { profit_margin: profitMargin, profit_amount: profitAmount } : {}),
       date: saleDate,
       items: [{ product_id: selectedProductId, quantity, unit_price: amount / quantity }],
     }, {
@@ -272,16 +397,6 @@ export default function SalesPage() {
     setTouched({});
   };
 
-  const handleUpdateSaleStatus = (id: string, status: Sale['status']) => {
-    updateSaleStatus.mutate({ id, status }, {
-      onSuccess: (updated) => {
-        if (selectedSale?.id === id) setSelectedSale(updated);
-        toast.success(`Status changed to ${status}`);
-      },
-      onError: (err) => toast.error(err.message),
-    });
-  };
-
   const handleUpdateDeliveryStatus = (id: string, status: DeliveryStatus) => {
     updateDeliveryStatusMutation.mutate({ id, delivery_status: status }, {
       onSuccess: (updated) => {
@@ -302,13 +417,12 @@ export default function SalesPage() {
   const saveEdit = () => {
     if (!selectedSale) return;
     const amount = Number(editForm.amount) || selectedSale.amount;
-    const profitMargin = Number(editForm.profitMargin) || selectedSale.profitMargin;
-    const profitAmount = (amount * profitMargin) / 100;
+    const profitMargin = isAdmin ? (Number(editForm.profitMargin) || selectedSale.profitMargin) : 0;
+    const profitAmount = isAdmin ? (amount * profitMargin) / 100 : 0;
     updateSale.mutate({
       id: selectedSale.id,
       amount,
-      profit_margin: profitMargin,
-      profit_amount: profitAmount,
+      ...(isAdmin ? { profit_margin: profitMargin, profit_amount: profitAmount } : {}),
       notes: editForm.notes,
       delivery_address: editForm.deliveryAddress,
       payment_terms: editForm.paymentTerms,
@@ -337,14 +451,22 @@ export default function SalesPage() {
 
   // ── CSV Export ──
   const handleExport = () => {
-    const headers = ['Date', 'Customer', 'Product', 'Agent', 'Amount', 'Profit', 'Margin %', 'Status', 'Channel', 'Delivery', 'Payment Terms', 'Credit', 'Notes'];
+    const headers = [
+      'Date Sold', 'Date Recorded', 'Last Updated',
+      'Customer', 'Product', 'Agent', 'Amount',
+      ...(isAdmin ? ['Profit', 'Margin %'] as const : []),
+      'Status', 'Channel', 'Delivery', 'Payment Terms', 'Credit', 'Notes',
+    ];
     const rows = filteredSales.map((s) => [
-      s.date, s.customerName, s.productDetails || '', s.agentName,
-      s.amount, s.profitAmount, s.profitMargin, s.status,
+      s.date, s.createdAt || '', s.updatedAt || '',
+      s.customerName, s.productDetails || '', s.agentName,
+      s.amount,
+      ...(isAdmin ? [s.profitAmount, s.profitMargin] : []),
+      s.status,
       s.channel || '', s.deliveryStatus || '', s.paymentTerms || '',
       s.isCredit ? 'Yes' : 'No', s.notes || '',
     ]);
-    const csv = [headers.join(','), ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const csv = [headers.join(','), ...rows.map((r) => r.map((v) => escapeCsvCell(v)).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -356,34 +478,13 @@ export default function SalesPage() {
   };
 
   // ── CSV Import ──
-  const handleCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCsvFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-      if (lines.length < 2) { setCsvErrors(['CSV must have a header row and at least one data row.']); return; }
-      const headers = lines[0].split(',').map((h) => h.replace(/^"|"$/g, '').trim().toLowerCase());
-      const requiredHeaders = ['date', 'customer', 'amount'];
-      const missing = requiredHeaders.filter((h) => !headers.includes(h));
-      if (missing.length > 0) { setCsvErrors([`Missing required columns: ${missing.join(', ')}. Required: date, customer, amount`]); return; }
-
-      const rows: Record<string, string>[] = [];
-      const errors: string[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].match(/("([^"]*("")*)*"|[^,]*)(,|$)/g)?.map((v) => v.replace(/,$/,'').replace(/^"|"$/g, '').replace(/""/g, '"').trim()) || [];
-        const row: Record<string, string> = {};
-        headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
-        if (!row.date || !row.customer || !row.amount) { errors.push(`Row ${i + 1}: Missing date, customer, or amount.`); continue; }
-        if (isNaN(Number(row.amount))) { errors.push(`Row ${i + 1}: Amount "${row.amount}" is not a number.`); continue; }
-        rows.push(row);
-      }
-      setCsvPreview(rows);
-      setCsvErrors(errors);
-      setShowImportModal(true);
-    };
-    reader.readAsText(file);
+    const { rows, errors } = await parseCsvFile(file);
+    setCsvPreview(rows);
+    setCsvErrors(errors);
+    if (rows.length > 0 || errors.length > 0) setShowImportModal(true);
     e.target.value = '';
   };
 
@@ -393,23 +494,25 @@ export default function SalesPage() {
     for (const row of csvPreview) {
       const amount = Number(row.amount) || 0;
       const margin = Number(row['margin %'] || row.margin || '20');
-      const matchedCustomer = customers.find((c) => c.name.toLowerCase() === (row.customer || '').toLowerCase());
+      const matchedCustomer = customers.find((c) => c.name.toLowerCase() === String(row.customer || '').toLowerCase());
       if (!matchedCustomer) continue;
-      const isCreditRow = (row.credit || '').toLowerCase() === 'yes';
+      const isCreditRow = String(row.credit || '').toLowerCase() === 'yes';
       const payment_mode = isCreditRow ? PaymentMode.FULL_CREDIT : PaymentMode.FULL_PAYMENT;
       const d = new Date(); d.setDate(d.getDate() + 30);
+      const importHubId = resolveHubId(hubScope.hubName || selectedHub);
+      if (!importHubId) continue;
       try {
         await createSale.mutateAsync({
           customer_id: matchedCustomer.id,
+          hub_id: importHubId,
           amount,
           payment_mode,
           due_date: isCreditRow ? d.toISOString().split('T')[0] : undefined,
-          profit_margin: margin,
-          profit_amount: (amount * margin) / 100,
-          date: row.date,
-          notes: row.notes || 'Imported from CSV',
-          channel: (row.channel as SalesChannel) || SalesChannel.WALK_IN,
-          delivery_status: (row.delivery as DeliveryStatus) || DeliveryStatus.NOT_APPLICABLE,
+          ...(isAdmin ? { profit_margin: margin, profit_amount: (amount * margin) / 100 } : {}),
+          date: String(row.date),
+          notes: String(row.notes || 'Imported from CSV'),
+          channel: String(row.channel || SalesChannel.WALK_IN),
+          delivery_status: String(row.delivery || DeliveryStatus.NOT_APPLICABLE),
         });
         imported += 1;
       } catch {
@@ -431,7 +534,10 @@ export default function SalesPage() {
 
   const customerSalesHistory = useMemo(() => {
     if (!selectedSale) return [];
-    return sales.filter((s) => s.customerId === selectedSale.customerId && s.id !== selectedSale.id && s.status !== 'Voided').sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+    return sales
+      .filter((s) => s.customerId === selectedSale.customerId && s.id !== selectedSale.id && s.status !== 'Voided')
+      .toSorted((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 10);
   }, [selectedSale, sales]);
 
   const deliverySteps: DeliveryStatus[] = [DeliveryStatus.PENDING, DeliveryStatus.IN_TRANSIT, DeliveryStatus.DELIVERED, DeliveryStatus.CONFIRMED];
@@ -442,8 +548,7 @@ export default function SalesPage() {
   const btnPrimary = 'inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2';
   const btnSecondary = 'inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2';
 
-  const statusColor = (s: string) => s === 'Paid' ? 'bg-green-100 text-green-800' : s === 'Approved' ? 'bg-blue-100 text-blue-800' : s === 'Voided' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800';
-  const deliveryColor = (s: string) => s === DeliveryStatus.DELIVERED || s === DeliveryStatus.CONFIRMED ? 'bg-green-100 text-green-800' : s === DeliveryStatus.IN_TRANSIT ? 'bg-blue-100 text-blue-800' : 'bg-yellow-100 text-yellow-800';
+  const closeDetailPanel = () => { setSelectedSale(null); setIsEditing(false); };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -462,16 +567,16 @@ export default function SalesPage() {
       </div>
 
       {/* ══════ KPI CARDS ══════ */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className={`grid grid-cols-2 md:grid-cols-3 gap-4 ${isAdmin ? 'lg:grid-cols-6' : 'lg:grid-cols-5'}`}>
         {[
           { label: 'Revenue', value: fmt(kpis.revenue), change: kpis.revenueChange, icon: <Banknote size={14} />, color: 'text-green-600' },
-          { label: 'Profit', value: fmt(kpis.profit), change: kpis.profitChange, icon: <TrendingUp size={14} />, color: 'text-blue-600' },
+          ...(isAdmin ? [{ label: 'Profit', value: fmt(kpis.profit), change: kpis.profitChange, icon: <TrendingUp size={14} />, color: 'text-blue-600' }] : []),
           { label: 'Total Sales', value: String(kpis.count), icon: <ShoppingCart size={14} />, color: 'text-primary' },
           { label: 'Avg. Order', value: fmt(Math.round(kpis.avgOrder)), icon: <BarChart3 size={14} />, color: 'text-purple-600' },
           { label: 'Credit Sales', value: `${kpis.creditCount} (${fmt(kpis.creditAmount)})`, icon: <CreditCard size={14} />, color: 'text-orange-600' },
           { label: 'Deliveries', value: String(kpis.deliveryCount), icon: <Truck size={14} />, color: 'text-teal-600' },
-        ].map((kpi, i) => (
-          <div key={i} className="rounded-md border bg-card p-4">
+        ].map((kpi) => (
+          <div key={kpi.label} className="rounded-md border bg-card p-4">
             <div className={`flex items-center gap-2 mb-1 ${kpi.color}`}>
               {kpi.icon}<span className="text-xs font-medium text-muted-foreground">{kpi.label}{hasFilters ? ' (filtered)' : ''}</span>
             </div>
@@ -495,12 +600,22 @@ export default function SalesPage() {
       </div>
 
       {/* ══════ FILTERS ══════ */}
-      <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center bg-card p-3 rounded-md border">
-        <div className="relative flex-1 min-w-0">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <input type="text" placeholder="Search customer, product, notes..." className={`${inputCls} pl-9`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 items-stretch sm:items-center bg-card p-3 rounded-md border">
+        <div className="relative w-full sm:max-w-sm lg:max-w-md shrink-0">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search customer, product, notes..."
+            className="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-1 flex-wrap items-center gap-2 min-w-0">
+          <select value={dateFieldFilter} onChange={(e) => setDateFieldFilter(e.target.value as SaleDateFieldFilter)} className="h-10 rounded-md border px-3 text-sm bg-background">
+            <option value="sold">Date Sold</option>
+            <option value="created">Date Recorded</option>
+          </select>
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium text-muted-foreground">From</span>
             <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setQuickPreset('all'); }} className="h-10 px-2 rounded-md border text-sm bg-background" />
@@ -515,7 +630,7 @@ export default function SalesPage() {
           <select value={filterChannel} onChange={(e) => setFilterChannel(e.target.value)} className="h-10 rounded-md border px-3 text-sm bg-background"><option value="All">All Channels</option>{Object.values(SalesChannel).map((c) => <option key={c} value={c}>{c}</option>)}</select>
           {hasFilters && <button onClick={clearFilters} className="h-10 px-3 rounded-md border text-sm font-medium text-muted-foreground hover:bg-accent">Clear</button>}
         </div>
-        <span className="text-xs text-muted-foreground whitespace-nowrap">{filteredSales.length} sale{filteredSales.length !== 1 ? 's' : ''}</span>
+        <span className="text-xs text-muted-foreground whitespace-nowrap sm:ml-auto">{saleCountLabel(filteredSales.length)}</span>
       </div>
 
       {/* ══════ SALES TABLE ══════ */}
@@ -523,7 +638,9 @@ export default function SalesPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 border-b"><tr>
-              <th className="h-12 px-4 text-left font-medium text-muted-foreground">Date</th>
+              <th className="h-12 px-4 text-left font-medium text-muted-foreground">Date Sold</th>
+              <th className="h-12 px-4 text-left font-medium text-muted-foreground">Date Recorded</th>
+              <th className="h-12 px-4 text-left font-medium text-muted-foreground">Last Updated</th>
               <th className="h-12 px-4 text-left font-medium text-muted-foreground">Customer</th>
               <th className="h-12 px-4 text-left font-medium text-muted-foreground">Product</th>
               <th className="h-12 px-4 text-right font-medium text-muted-foreground">Amount</th>
@@ -533,10 +650,12 @@ export default function SalesPage() {
             <tbody className="divide-y">
               {filteredSales.map((sale) => {
                 const paid = sale.amountPaid ?? (sale.isCredit ? 0 : sale.amount);
-                const mode = sale.paymentMode || (sale.isCredit ? (paid > 0 ? PaymentMode.PARTIAL_CREDIT : PaymentMode.FULL_CREDIT) : PaymentMode.FULL_PAYMENT);
+                const mode = resolveSalePaymentMode(sale, paid);
                 return (
                 <tr key={sale.id} onClick={() => { setSelectedSale(sale); setDetailTab('overview'); setIsEditing(false); }} className={`hover:bg-muted/50 cursor-pointer group ${sale.status === 'Voided' ? 'opacity-50' : ''}`}>
                   <td className="p-4 text-muted-foreground whitespace-nowrap">{sale.date}</td>
+                  <td className="p-4 text-muted-foreground whitespace-nowrap text-xs">{sale.createdAt || '—'}</td>
+                  <td className="p-4 text-muted-foreground whitespace-nowrap text-xs">{sale.updatedAt || '—'}</td>
                   <td className="p-4">
                     <span className="font-medium">{sale.customerName}</span>
                     {sale.channel && sale.channel !== SalesChannel.WALK_IN && (
@@ -555,8 +674,8 @@ export default function SalesPage() {
                       {sale.status === 'Voided' ? (
                         <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-red-100 text-red-800">Voided</span>
                       ) : (
-                        <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${mode === PaymentMode.FULL_PAYMENT ? 'bg-green-100 text-green-800' : mode === PaymentMode.FULL_CREDIT ? 'bg-orange-100 text-orange-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                          {mode === PaymentMode.FULL_PAYMENT ? 'Paid' : mode === PaymentMode.FULL_CREDIT ? 'Credit' : 'Partial'}
+                        <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${paymentModeBadgeClass(mode)}`}>
+                          {paymentModeLabel(mode)}
                         </span>
                       )}
                       {sale.paymentType && mode !== PaymentMode.FULL_CREDIT && sale.status !== 'Voided' && (
@@ -568,7 +687,7 @@ export default function SalesPage() {
                 </tr>
                 );
               })}
-              {filteredSales.length === 0 && <tr><td colSpan={6} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>}
+              {filteredSales.length === 0 && <tr><td colSpan={8} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -576,8 +695,19 @@ export default function SalesPage() {
 
       {/* ══════ DETAIL SIDE PANEL ══════ */}
       {selectedSale && (
-        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex justify-end" onClick={() => { setSelectedSale(null); setIsEditing(false); }}>
-          <div className="w-full max-w-2xl bg-card border-l shadow-xl h-full overflow-y-auto animate-in slide-in-from-right duration-200" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex justify-end"
+          role="presentation"
+          onClick={closeDetailPanel}
+          onKeyDown={(e) => handleOverlayKeyDown(e, closeDetailPanel)}
+        >
+          <div
+            className="w-full max-w-2xl bg-card border-l shadow-xl h-full overflow-y-auto animate-in slide-in-from-right duration-200"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <div className="p-6 border-b flex justify-between items-start sticky top-0 bg-card z-10">
               <div className="flex-1 min-w-0">
@@ -598,7 +728,7 @@ export default function SalesPage() {
                     <button onClick={() => setIsEditing(false)} className="h-8 px-3 rounded-md flex items-center gap-1.5 border hover:bg-accent text-sm font-medium">Cancel</button>
                   </>
                 )}
-                <button onClick={() => { setSelectedSale(null); setIsEditing(false); }} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
+                <button onClick={closeDetailPanel} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
               </div>
             </div>
 
@@ -643,7 +773,7 @@ export default function SalesPage() {
                   {/* Payment info row */}
                   <div className="flex items-center gap-3 flex-wrap text-sm">
                     {selectedSale.paymentMode && (
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${selectedSale.paymentMode === PaymentMode.FULL_PAYMENT ? 'bg-green-100 text-green-800' : selectedSale.paymentMode === PaymentMode.FULL_CREDIT ? 'bg-orange-100 text-orange-800' : 'bg-yellow-100 text-yellow-800'}`}>{selectedSale.paymentMode}</span>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${paymentModeBadgeClass(selectedSale.paymentMode as PaymentMode)}`}>{selectedSale.paymentMode}</span>
                     )}
                     {selectedSale.paymentType && (
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{selectedSale.paymentType}</span>
@@ -666,8 +796,18 @@ export default function SalesPage() {
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="flex items-center gap-2">
                       <Calendar size={14} className="text-muted-foreground" />
-                      <span className="text-muted-foreground">Date:</span>
+                      <span className="text-muted-foreground">Date Sold:</span>
                       <span className="font-medium">{selectedSale.date}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Clock size={14} className="text-muted-foreground" />
+                      <span className="text-muted-foreground">Date Recorded:</span>
+                      <span className="font-medium">{selectedSale.createdAt || '—'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Edit3 size={14} className="text-muted-foreground" />
+                      <span className="text-muted-foreground">Last Updated:</span>
+                      <span className="font-medium">{selectedSale.updatedAt || '—'}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Users size={14} className="text-muted-foreground" />
@@ -729,9 +869,9 @@ export default function SalesPage() {
 
                   {/* Notes */}
                   <div>
-                    <label className="text-sm font-medium text-muted-foreground mb-1 block">Notes</label>
+                    <label htmlFor="sale-edit-notes" className="text-sm font-medium text-muted-foreground mb-1 block">Notes</label>
                     {isEditing ? (
-                      <textarea value={editForm.notes || ''} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} rows={3} className={`${inputCls} h-auto resize-none`} />
+                      <textarea id="sale-edit-notes" value={editForm.notes || ''} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} rows={3} className={`${inputCls} h-auto resize-none`} />
                     ) : (
                       <p className="text-sm text-muted-foreground">{selectedSale.notes || 'No notes'}</p>
                     )}
@@ -758,9 +898,7 @@ export default function SalesPage() {
                   {/* Void button */}
                   {selectedSale.status !== 'Voided' && !isEditing && can('sales.void') && (
                     <div className="pt-4 border-t">
-                      {!showVoidConfirm ? (
-                        <button onClick={() => setShowVoidConfirm(true)} className="inline-flex items-center gap-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md px-3 py-2"><Trash2 size={14} /> Void this sale</button>
-                      ) : (
+                      {showVoidConfirm ? (
                         <div className="p-4 rounded-md border border-red-200 bg-red-50">
                           <p className="text-sm text-red-800 font-medium mb-3">Are you sure? This will reverse customer stats and mark the sale as voided.</p>
                           <div className="flex gap-2">
@@ -768,6 +906,8 @@ export default function SalesPage() {
                             <button onClick={() => setShowVoidConfirm(false)} className={btnSecondary}>Cancel</button>
                           </div>
                         </div>
+                      ) : (
+                        <button onClick={() => setShowVoidConfirm(true)} className="inline-flex items-center gap-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md px-3 py-2"><Trash2 size={14} /> Void this sale</button>
                       )}
                     </div>
                   )}
@@ -895,18 +1035,18 @@ export default function SalesPage() {
               {/* Hub & Channel */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className={labelCls}>Hub Location</label>
+                  <label htmlFor="sale-hub" className={labelCls}>Hub Location</label>
                   {hubScope.canSwitchHubs ? (
-                    <select value={selectedHub} onChange={(e) => { setSelectedHub(e.target.value); setSelectedProductId(''); }} className={inputCls}>
+                    <select id="sale-hub" value={selectedHub} onChange={(e) => { setSelectedHub(e.target.value); setSelectedProductId(''); }} className={inputCls}>
                       {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
                     </select>
                   ) : (
-                    <input type="text" readOnly disabled value={hubScope.hubName} className={`${inputCls} opacity-80 cursor-not-allowed`} />
+                    <input id="sale-hub" type="text" readOnly disabled value={hubScope.hubName} className={`${inputCls} opacity-80 cursor-not-allowed`} />
                   )}
                 </div>
                 <div className="space-y-2">
-                  <label className={labelCls}>Sales Channel</label>
-                  <select value={newSale.channel || SalesChannel.WALK_IN} onChange={(e) => { const ch = e.target.value as SalesChannel; setNewSale({ ...newSale, channel: ch, deliveryStatus: ch === SalesChannel.DELIVERY ? DeliveryStatus.PENDING : DeliveryStatus.NOT_APPLICABLE }); }} className={inputCls}>
+                  <label htmlFor="sale-channel" className={labelCls}>Sales Channel</label>
+                  <select id="sale-channel" value={newSale.channel || SalesChannel.WALK_IN} onChange={(e) => { const ch = e.target.value as SalesChannel; setNewSale({ ...newSale, channel: ch, deliveryStatus: ch === SalesChannel.DELIVERY ? DeliveryStatus.PENDING : DeliveryStatus.NOT_APPLICABLE }); }} className={inputCls}>
                     {Object.values(SalesChannel).map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
@@ -916,20 +1056,20 @@ export default function SalesPage() {
               {newSale.channel === SalesChannel.DELIVERY && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 rounded-md border border-dashed bg-muted/20">
                   <div className="space-y-2">
-                    <label className={labelCls}>Delivery Address</label>
-                    <input type="text" value={newSale.deliveryAddress || ''} onChange={(e) => setNewSale({ ...newSale, deliveryAddress: e.target.value })} placeholder="Enter address" className={inputCls} />
+                    <label htmlFor="sale-delivery-address" className={labelCls}>Delivery Address</label>
+                    <input id="sale-delivery-address" type="text" value={newSale.deliveryAddress || ''} onChange={(e) => setNewSale({ ...newSale, deliveryAddress: e.target.value })} placeholder="Enter address" className={inputCls} />
                   </div>
                   <div className="space-y-2">
-                    <label className={labelCls}>Customer Phone</label>
-                    <input type="text" value={newSale.customerPhone || ''} onChange={(e) => setNewSale({ ...newSale, customerPhone: e.target.value })} placeholder="Phone for delivery" className={inputCls} />
+                    <label htmlFor="sale-customer-phone" className={labelCls}>Customer Phone</label>
+                    <input id="sale-customer-phone" type="text" value={newSale.customerPhone || ''} onChange={(e) => setNewSale({ ...newSale, customerPhone: e.target.value })} placeholder="Phone for delivery" className={inputCls} />
                   </div>
                 </div>
               )}
 
               {/* Customer */}
               <div className="space-y-2">
-                <label className={labelCls}>Customer *</label>
-                <select value={newSale.customerId || ''} onChange={(e) => { setNewSale({ ...newSale, customerId: e.target.value }); setTouched((t) => ({ ...t, customerId: true })); }} className={`${inputCls} ${touched.customerId && validationErrors.customerId ? 'border-red-500' : ''}`}>
+                <label htmlFor="sale-customer" className={labelCls}>Customer *</label>
+                <select id="sale-customer" value={newSale.customerId || ''} onChange={(e) => { setNewSale({ ...newSale, customerId: e.target.value }); setTouched((t) => ({ ...t, customerId: true })); }} className={`${inputCls} ${touched.customerId && validationErrors.customerId ? 'border-red-500' : ''}`}>
                   <option value="">-- Select Customer --</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
                 </select>
                 {touched.customerId && validationErrors.customerId && <p className="text-xs text-red-500">{validationErrors.customerId}</p>}
@@ -966,8 +1106,8 @@ export default function SalesPage() {
 
               {/* Product */}
               <div className="space-y-2">
-                <label className={labelCls}>Product *</label>
-                <select value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={`${inputCls} ${touched.productId && validationErrors.productId ? 'border-red-500' : ''}`}>
+                <label htmlFor="sale-product" className={labelCls}>Product *</label>
+                <select id="sale-product" value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={`${inputCls} ${touched.productId && validationErrors.productId ? 'border-red-500' : ''}`}>
                   <option value="">-- Select Product --</option>{availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name} (Stock: {i.currentStock} {i.unitOfMeasure})</option>)}
                 </select>
                 {touched.productId && validationErrors.productId && <p className="text-xs text-red-500">{validationErrors.productId}</p>}
@@ -987,13 +1127,13 @@ export default function SalesPage() {
               {/* Quantity & Amount */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className={labelCls}>Quantity</label>
-                  <input type="number" min={1} max={selectedInventoryItem?.currentStock || undefined} value={quantity} onChange={(e) => handleQuantityChange(parseInt(e.target.value) || 0)} className={`${inputCls} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`} />
+                  <label htmlFor="sale-quantity" className={labelCls}>Quantity</label>
+                  <input id="sale-quantity" type="number" min={1} max={selectedInventoryItem?.currentStock || undefined} value={quantity} onChange={(e) => handleQuantityChange(Number.parseInt(e.target.value, 10) || 0)} className={`${inputCls} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`} />
                   {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
                 </div>
                 <div className="space-y-2">
-                  <label className={labelCls}>Amount ({NAIRA})</label>
-                  <input type="number" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: parseInt(e.target.value) || 0 })} className={inputCls} />
+                  <label htmlFor="sale-amount" className={labelCls}>Amount ({NAIRA})</label>
+                  <input id="sale-amount" type="number" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: Number.parseInt(e.target.value, 10) || 0 })} className={inputCls} />
                 </div>
               </div>
               {/* Live price breakdown */}
@@ -1008,8 +1148,8 @@ export default function SalesPage() {
 
               {/* Payment Mode */}
               <div className="space-y-2">
-                <label className={labelCls}>Amount Paid *</label>
-                <div className="flex items-center gap-2">
+                <p id="sale-payment-mode-label" className={labelCls}>Amount Paid *</p>
+                <div className="flex items-center gap-2" role="group" aria-labelledby="sale-payment-mode-label">
                   {Object.values(PaymentMode).map((mode) => (
                     <button key={mode} type="button" onClick={() => {
                       setPaymentMode(mode);
@@ -1025,8 +1165,8 @@ export default function SalesPage() {
               {/* Amount paid input (only for partial credit) */}
               {paymentMode === PaymentMode.PARTIAL_CREDIT && (
                 <div className="space-y-2">
-                  <label className={labelCls}>Amount Paid Now ({NAIRA})</label>
-                  <input type="number" min={0} max={Number(newSale.amount) || undefined} value={amountPaid} onChange={(e) => setAmountPaid(parseInt(e.target.value) || 0)} className={inputCls} />
+                  <label htmlFor="sale-amount-paid" className={labelCls}>Amount Paid Now ({NAIRA})</label>
+                  <input id="sale-amount-paid" type="number" min={0} max={Number(newSale.amount) || undefined} value={amountPaid} onChange={(e) => setAmountPaid(Number.parseInt(e.target.value, 10) || 0)} className={inputCls} />
                   {Number(newSale.amount) > 0 && (
                     <p className="text-xs text-orange-600 font-medium">Balance on credit: {fmt(Math.max(0, Number(newSale.amount) - amountPaid))}</p>
                   )}
@@ -1035,8 +1175,9 @@ export default function SalesPage() {
 
               {(paymentMode === PaymentMode.FULL_CREDIT || paymentMode === PaymentMode.PARTIAL_CREDIT) && (
                 <div className="space-y-2">
-                  <label className={labelCls}>Due Date *</label>
+                  <label htmlFor="sale-due-date" className={labelCls}>Due Date *</label>
                   <input
+                    id="sale-due-date"
                     type="date"
                     value={dueDate}
                     onChange={(e) => { setDueDate(e.target.value); setTouched((t) => ({ ...t, dueDate: true })); }}
@@ -1057,8 +1198,8 @@ export default function SalesPage() {
               {/* Payment Type */}
               {paymentMode !== PaymentMode.FULL_CREDIT && (
                 <div className="space-y-2">
-                  <label className={labelCls}>Payment Type</label>
-                  <div className="flex items-center gap-2">
+                  <p id="sale-payment-type-label" className={labelCls}>Payment Type</p>
+                  <div className="flex items-center gap-2" role="group" aria-labelledby="sale-payment-type-label">
                     {Object.values(PaymentType).map((type) => (
                       <button key={type} type="button" onClick={() => setPaymentType(type)} className={`flex-1 py-2 px-3 rounded-md text-xs font-medium border transition-colors ${paymentType === type ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
                         {type}
@@ -1071,12 +1212,12 @@ export default function SalesPage() {
               {/* Date & Agent */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <label className={labelCls}>Date</label>
-                  <input type="date" value={newSale.date || ''} onChange={(e) => setNewSale({ ...newSale, date: e.target.value })} className={inputCls} />
+                  <label htmlFor="sale-date" className={labelCls}>Date</label>
+                  <input id="sale-date" type="date" value={newSale.date || ''} onChange={(e) => setNewSale({ ...newSale, date: e.target.value })} className={inputCls} />
                 </div>
                 <div className="space-y-2">
-                  <label className={labelCls}>Agent</label>
-                  <select value={newSale.agentId || user?.id || ''} onChange={(e) => setNewSale({ ...newSale, agentId: e.target.value })} className={inputCls}>
+                  <label htmlFor="sale-agent" className={labelCls}>Agent</label>
+                  <select id="sale-agent" value={newSale.agentId || user?.id || ''} onChange={(e) => setNewSale({ ...newSale, agentId: e.target.value })} className={inputCls}>
                     {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
@@ -1084,8 +1225,8 @@ export default function SalesPage() {
 
               {/* Notes */}
               <div className="space-y-2">
-                <label className={labelCls}>Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
-                <textarea value={newSale.notes || ''} onChange={(e) => setNewSale({ ...newSale, notes: e.target.value })} placeholder="Internal comments..." rows={2} className={`${inputCls} h-auto resize-none`} />
+                <label htmlFor="sale-notes" className={labelCls}>Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
+                <textarea id="sale-notes" value={newSale.notes || ''} onChange={(e) => setNewSale({ ...newSale, notes: e.target.value })} placeholder="Internal comments..." rows={2} className={`${inputCls} h-auto resize-none`} />
               </div>
             </div>
             <div className="mt-6 flex justify-end gap-3">
@@ -1112,7 +1253,7 @@ export default function SalesPage() {
               <div className="mb-4 p-3 rounded-md border border-orange-300 bg-orange-50 text-sm">
                 <p className="font-medium text-orange-800 mb-1">Warnings ({csvErrors.length}):</p>
                 <div className="max-h-24 overflow-y-auto space-y-0.5">
-                  {csvErrors.map((err, i) => <p key={i} className="text-orange-700 text-xs">{err}</p>)}
+                  {csvErrors.map((err) => <p key={err} className="text-orange-700 text-xs">{err}</p>)}
                 </div>
               </div>
             )}
@@ -1140,11 +1281,11 @@ export default function SalesPage() {
                       <th className="h-8 px-3 text-center font-medium text-muted-foreground">Match</th>
                     </tr></thead>
                     <tbody className="divide-y">
-                      {csvPreview.slice(0, 50).map((row, i) => {
-                        const matched = customers.find((c) => c.name.toLowerCase() === (row.customer || '').toLowerCase());
+                      {csvPreview.slice(0, 50).map((row) => {
+                        const matched = customers.find((c) => c.name.toLowerCase() === String(row.customer || '').toLowerCase());
                         return (
-                          <tr key={i} className="hover:bg-muted/30">
-                            <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
+                          <tr key={`csv-row-${row.lineNo}`} className="hover:bg-muted/30">
+                            <td className="px-3 py-2 text-muted-foreground">{row.lineNo - 1}</td>
                             <td className="px-3 py-2">{row.date}</td>
                             <td className="px-3 py-2 font-medium">{row.customer}</td>
                             <td className="px-3 py-2 text-right">{fmt(Number(row.amount) || 0)}</td>

@@ -15,7 +15,6 @@ import {
   ApiSale,
   ApiProduct,
   ApiStockLog,
-  ApiAgentUser,
   ApiUsersListResponse,
   ApiRole,
   ApiFeedback,
@@ -58,10 +57,11 @@ import {
   normalizeDashboardMetrics,
 } from '@/lib/api-mappers';
 import {
-  Customer, Sale, Feedback, Compensation,
-  Enquiry, Agent, Task, InventoryItem, StockLog,
-  CreditRecord, AuditLog, Hub, Sentiment,
-  FeedbackType, FeedbackPriority,
+  Compensation,
+  Enquiry,
+  Hub,
+  FeedbackType,
+  FeedbackPriority,
 } from '../types';
 
 
@@ -113,10 +113,8 @@ export function useAnalyticsOverview(filters?: { hub_id?: string }) {
       const params = new URLSearchParams();
       if (filters?.hub_id) params.set('hub_id', filters.hub_id);
       const qs = params.toString();
-      const res = await axiosGet(
-        `analytics/overview${qs ? `?${qs}` : ''}`,
-        true,
-      ) as ApiResponse<AnalyticsOverviewData>;
+      const path = qs ? `analytics/overview?${qs}` : 'analytics/overview';
+      const res = await axiosGet(path, true) as ApiResponse<AnalyticsOverviewData>;
       return res.data;
     },
   });
@@ -138,7 +136,6 @@ export function useCreateHub() {
       hub_address?: string;
       hub_phone?: string;
       hub_manager?: string;
-      manager_name?: string;
       is_active?: boolean;
     }) => {
       requireApi();
@@ -149,7 +146,6 @@ export function useCreateHub() {
           hub_address: dto.hub_address?.trim() || '-',
           hub_phone: dto.hub_phone?.trim() || '-',
           hub_manager: dto.hub_manager,
-          manager_name: dto.manager_name,
           is_active: dto.is_active ?? true,
         },
         true,
@@ -171,8 +167,7 @@ export function useUpdateHub() {
       hub_name?: string;
       hub_address?: string;
       hub_phone?: string;
-      hub_manager?: string;
-      manager_name?: string;
+      hub_manager?: string | null;
       is_active?: boolean;
     }) => {
       requireApi();
@@ -442,7 +437,7 @@ export function useDeleteSegment() {
 }
 
 // --- Sales ---
-export function useSales(filters?: { status?: string; date_from?: string; date_to?: string; payment_mode?: string; hub_id?: string }) {
+export function useSales(filters?: { status?: string; date_from?: string; date_to?: string; date_field?: string; payment_mode?: string; hub_id?: string }) {
   return useQuery({
     queryKey: ['sales', filters],
     queryFn: async () => {
@@ -458,6 +453,7 @@ export function useCreateSale() {
   return useMutation({
     mutationFn: async (dto: {
       customer_id: string;
+      hub_id: string;
       amount: number;
       amount_paid?: number;
       payment_mode: string;
@@ -656,7 +652,8 @@ export function useCreditSummary(filters?: { search?: string; flagged?: boolean 
       if (filters?.search) params.set('search', filters.search);
       if (filters?.flagged) params.set('flagged', 'true');
       const qs = params.toString();
-      const res = await axiosGet(`credits/summary${qs ? `?${qs}` : ''}`, true) as ApiListResponse<ApiCreditCustomerSummary[]>;
+      const path = qs ? `credits/summary?${qs}` : 'credits/summary';
+      const res = await axiosGet(path, true) as ApiListResponse<ApiCreditCustomerSummary[]>;
       return res.data.map(mapCreditCustomerSummary);
     },
   });

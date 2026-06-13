@@ -114,6 +114,7 @@ export interface ApiHub {
   hub_name: string;
   hub_address?: string;
   hub_phone?: string;
+  hub_manager?: string | { _id: string; full_name?: string; email?: string };
   manager_name?: string;
   is_active?: boolean;
   createdAt?: string;
@@ -174,6 +175,8 @@ export interface ApiSale {
   due_date?: string;
   items?: ApiSaleItem[];
   credit_record?: string | ApiCreditRecord;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ApiProduct {

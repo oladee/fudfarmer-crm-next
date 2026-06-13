@@ -53,7 +53,7 @@ export default function DashboardPage() {
   const [custFilter, setCustFilter] = useState<'all' | 'B2B' | 'B2C'>('all');
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
 
-  const { can, user } = usePermissions();
+  const { can, isAdmin, user } = usePermissions();
   const { data: metrics } = useDashboardMetrics();
 
   const customers = metrics?.customers ?? [];
@@ -361,7 +361,7 @@ export default function DashboardPage() {
 
         <div className="p-5">
           {/* KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+          <div className={`grid gap-4 mb-5 ${isAdmin ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'}`}>
             <div>
               <p className="text-[10px] font-bold text-muted-foreground uppercase">Revenue</p>
               <p className="text-2xl font-black text-emerald-600">{salesData.revenue > 0 ? fmtK(salesData.revenue) : '—'}</p>
@@ -371,10 +371,12 @@ export default function DashboardPage() {
               <p className="text-2xl font-black">{salesData.orders}</p>
               {salesData.aov > 0 && <p className="text-[10px] text-muted-foreground">AOV: {fmtK(salesData.aov)}</p>}
             </div>
-            <div>
-              <p className="text-[10px] font-bold text-muted-foreground uppercase">Profit</p>
-              <p className="text-2xl font-black">{salesData.profit > 0 ? fmtK(salesData.profit) : '—'}</p>
-            </div>
+            {isAdmin && (
+              <div>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase">Profit</p>
+                <p className="text-2xl font-black">{salesData.profit > 0 ? fmtK(salesData.profit) : '—'}</p>
+              </div>
+            )}
             <div>
               <p className="text-[10px] font-bold text-muted-foreground uppercase">Cash / Credit</p>
               <p className="text-sm font-bold text-emerald-600">{fmtK(salesData.cashRevenue)}</p>

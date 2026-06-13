@@ -153,7 +153,7 @@ function getUniqueSuppliers(logs: StockLog[]): string[] {
 
 export default function InventoryPage() {
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, isAdmin } = usePermissions();
   const hubScope = useHubScopeFilter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: items = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
@@ -704,7 +704,7 @@ export default function InventoryPage() {
           },
           { label: 'Low Stock Alerts', value: lowStockItems.length, icon: <AlertTriangle size={14} />, color: lowStockItems.length > 0 ? 'text-red-600' : 'text-muted-foreground', sub: null },
           { label: 'Expiring Soon', value: expiringSoonCount, icon: <Thermometer size={14} />, color: expiringSoonCount > 0 ? 'text-orange-600' : 'text-muted-foreground', sub: null },
-          { label: 'Retail Value', value: `\u20A6${retailValue.toLocaleString()}`, icon: <span className="text-sm font-bold">₦</span>, color: 'text-green-600', sub: null },
+          ...(isAdmin ? [{ label: 'Retail Value', value: `\u20A6${retailValue.toLocaleString()}`, icon: <span className="text-sm font-bold">₦</span>, color: 'text-green-600', sub: null }] : []),
         ].map((kpi, i) => (
           <div key={i} className="rounded-md border bg-card p-4">
             <div className={`flex items-center gap-2 mb-1 ${kpi.color}`}>{kpi.icon}<span className="text-xs font-medium text-muted-foreground">{kpi.label}</span></div>

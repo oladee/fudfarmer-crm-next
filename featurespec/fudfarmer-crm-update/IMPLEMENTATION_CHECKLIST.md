@@ -60,7 +60,7 @@ Legend: ✅ Done · 🟡 Partial · ⬜ Not started
 | Item | Status |
 |------|--------|
 | types/api.ts + mapApiUser | ✅ |
-| auth-context + middleware + login | ✅ |
+| auth-context + login (client route guard via `(app)/layout.tsx`; no middleware) | ✅ |
 | PERMISSION_MAP + useDataScope | ✅ |
 | Sidebar hub + credits badge | ✅ |
 | Hub switcher gating (inventory/customers/sales) | ✅ |

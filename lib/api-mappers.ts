@@ -39,7 +39,6 @@ import {
   PaymentTerms,
   SalesChannel,
   DeliveryStatus,
-  CreditRecord,
 } from '@/types';
 import { mapCreditCustomerSummary } from '@/lib/credit-mappers';
 
@@ -55,6 +54,33 @@ export function getId(obj: { _id?: string; id?: string } | string | undefined): 
   return obj._id || obj.id || '';
 }
 
+function refId(value: string | { _id?: string; id?: string } | null | undefined): string {
+  return getId(value ?? undefined);
+}
+
+function customerRefId(customer: string | ApiCustomer | null | undefined): string {
+  if (typeof customer === 'object' && customer !== null) return customer._id;
+  if (typeof customer === 'string') return customer;
+  return '';
+}
+
+function resolvedByAgentId(
+  resolvedBy: string | { _id?: string; full_name?: string } | null | undefined,
+): string | undefined {
+  if (typeof resolvedBy === 'string') return resolvedBy;
+  if (resolvedBy && typeof resolvedBy === 'object') return resolvedBy._id;
+  return undefined;
+}
+
+function resolvedByAgentName(
+  resolvedBy: string | { _id?: string; full_name?: string } | null | undefined,
+  resolvedByName?: string,
+): string | undefined {
+  if (resolvedByName) return resolvedByName;
+  if (resolvedBy && typeof resolvedBy === 'object') return resolvedBy.full_name;
+  return undefined;
+}
+
 export function buildHubMap(hubs: Hub[]): Record<string, string> {
   return Object.fromEntries(hubs.map((h) => [h.id, h.name]));
 }
@@ -65,7 +91,7 @@ function resolveHubName(
 ): string {
   if (typeof location === 'object' && location !== null) {
     if ('hub_name' in location && location.hub_name) return location.hub_name;
-    const id = getId(location as { _id?: string });
+    const id = getId(location);
     if (id && hubMap?.[id]) return hubMap[id];
   }
   if (typeof location === 'string') {
@@ -89,12 +115,19 @@ function titleCaseStatus(s: string): 'Open' | 'Resolved' | 'Closed' {
 }
 
 export function mapHub(h: ApiHub): Hub {
+  const hubManager =
+    typeof h.hub_manager === 'object' && h.hub_manager
+      ? h.hub_manager
+      : null;
   return {
     id: h._id,
     name: h.hub_name,
     address: h.hub_address,
     phone: h.hub_phone,
-    managerName: h.manager_name,
+    hubManagerId:
+      hubManager?._id ??
+      (typeof h.hub_manager === 'string' ? h.hub_manager : undefined),
+    managerName: hubManager?.full_name ?? h.manager_name,
     isActive: h.is_active !== false,
     createdDate: toDateStr(h.createdAt) || new Date().toISOString().split('T')[0],
   };
@@ -129,13 +162,15 @@ export function mapSale(s: ApiSale): Sale {
   const paymentMode = s.payment_mode || 'Full Payment';
   return {
     id: s.id || s._id || '',
-    customerId: typeof s.customer === 'string' ? s.customer : getId(s.customer as { _id?: string }),
+    customerId: refId(s.customer),
     customerName: s.customer_name,
     amount: s.amount,
     profitMargin: s.profit_margin ?? 0,
     profitAmount: s.profit_amount ?? 0,
     date: toDateStr(s.date),
-    agentId: typeof s.agent === 'string' ? s.agent : getId(s.agent as { _id?: string }),
+    createdAt: toDateStr(s.createdAt),
+    updatedAt: toDateStr(s.updatedAt),
+    agentId: refId(s.agent),
     agentName: s.agent_name,
     status: s.status as Sale['status'],
     productDetails: s.product_details,
@@ -178,7 +213,7 @@ export function mapStockLog(l: ApiStockLog): StockLog {
   return {
     id: l._id,
     date: toDateStr(l.date),
-    itemId: typeof l.item === 'string' ? l.item : getId(l.item as { _id?: string }),
+    itemId: refId(l.item),
     itemName: l.item_name,
     type: l.type as StockMovementType,
     quantity: l.quantity,
@@ -187,7 +222,7 @@ export function mapStockLog(l: ApiStockLog): StockLog {
     unitPrice: l.unit_price ?? 0,
     referenceId: l.reference_id,
     notes: l.notes,
-    agentId: typeof l.agent === 'string' ? l.agent : getId(l.agent as { _id?: string }),
+    agentId: refId(l.agent),
     batchNumber: l.batch_number,
     expiryDate: l.expiry_date ? toDateStr(l.expiry_date) : undefined,
     supplier: l.supplier,
@@ -215,9 +250,7 @@ export function mapAgent(u: ApiAgentUser): Agent {
 
 export function mapFeedback(f: ApiFeedback): Feedback {
   const customer =
-    typeof f.customer === 'object' && f.customer !== null
-      ? (f.customer as ApiCustomer)
-      : null;
+    typeof f.customer === 'object' && f.customer !== null ? f.customer : null;
   const typeMap: Record<string, FeedbackType> = {
     complaint: FeedbackType.COMPLAINT,
     suggestion: FeedbackType.SUGGESTION,
@@ -230,7 +263,7 @@ export function mapFeedback(f: ApiFeedback): Feedback {
   };
   return {
     id: f._id,
-    customerId: customer ? customer._id : typeof f.customer === 'string' ? f.customer : '',
+    customerId: customerRefId(f.customer),
     customerName: customer?.customer_name || 'Unknown',
     type: typeMap[f.type?.toLowerCase()] || FeedbackType.COMPLAINT,
     content: f.content,
@@ -240,17 +273,8 @@ export function mapFeedback(f: ApiFeedback): Feedback {
     priority: (f.priority as FeedbackPriority) || FeedbackPriority.MEDIUM,
     resolutionNote: f.resolution,
     resolvedDate: f.resolution_date ? toDateStr(f.resolution_date) : undefined,
-    resolvedByAgentId:
-      typeof f.resolved_by === 'object' && f.resolved_by !== null
-        ? (f.resolved_by as { _id?: string })._id
-        : typeof f.resolved_by === 'string'
-          ? f.resolved_by
-          : undefined,
-    resolvedByAgentName:
-      f.resolved_by_name ||
-      (typeof f.resolved_by === 'object' && f.resolved_by !== null
-        ? (f.resolved_by as { full_name?: string }).full_name
-        : undefined),
+    resolvedByAgentId: resolvedByAgentId(f.resolved_by),
+    resolvedByAgentName: resolvedByAgentName(f.resolved_by, f.resolved_by_name),
   };
 }
 
@@ -289,12 +313,10 @@ function mapCompensationCategory(cat?: string): CompensationCategory {
 
 export function mapCompensation(c: ApiCompensation & { value?: number }): Compensation {
   const customer =
-    typeof c.customer === 'object' && c.customer !== null
-      ? (c.customer as ApiCustomer)
-      : null;
+    typeof c.customer === 'object' && c.customer !== null ? c.customer : null;
   return {
     id: c._id,
-    customerId: customer ? customer._id : typeof c.customer === 'string' ? c.customer : '',
+    customerId: customerRefId(c.customer),
     customerName: c.customer_name || customer?.customer_name || 'Unknown',
     reason: c.reason || '',
     amount: c.amount ?? c.value ?? 0,
@@ -317,7 +339,7 @@ export function mapAuditLog(l: ApiAuditLog, hubMap?: Record<string, string>): Au
   return {
     id: l._id,
     timestamp: l.timestamp,
-    userId: typeof l.user === 'string' ? l.user : l.user ? getId(l.user as { _id?: string }) : '',
+    userId: refId(l.user),
     userName: l.user_name,
     action: l.action,
     entityType: capitalizeWords(l.entity_type) as AuditLog['entityType'],
@@ -343,7 +365,7 @@ export function mapTask(t: ApiTask): Task {
     id: t._id,
     title: t.title,
     description: t.description || '',
-    assignedToId: typeof t.assigned_to === 'string' ? t.assigned_to : getId(t.assigned_to as { _id?: string }),
+    assignedToId: refId(t.assigned_to),
     assignedToName: t.assigned_to_name || '',
     dueDate: toDateStr(t.due_date),
     priority: priorityMap[t.priority?.toLowerCase()] || TaskPriority.MEDIUM,

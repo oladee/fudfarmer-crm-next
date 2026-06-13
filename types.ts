@@ -16,6 +16,7 @@ export interface Hub {
   name: string;
   address?: string;
   phone?: string;
+  hubManagerId?: string;
   managerName?: string;
   isActive: boolean;
   createdDate: string;
@@ -261,6 +262,8 @@ export interface Sale {
   profitMargin: number;
   profitAmount: number;
   date: string;
+  createdAt?: string;
+  updatedAt?: string;
   agentId: string;
   agentName: string;
   status: 'Pending' | 'Approved' | 'Paid' | 'Voided';
