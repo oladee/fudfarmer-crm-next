@@ -1,0 +1,308 @@
+'use client';
+
+import { AlertTriangle, X } from 'lucide-react';
+import {
+  Sale,
+  Customer,
+  Agent,
+  InventoryItem,
+  SalesChannel,
+  DeliveryStatus,
+  PaymentType,
+  PaymentMode,
+} from '@/types';
+import type { AppUser } from '@/types/api';
+import type { HubScopeFilter } from '@/hooks/use-hub-scope';
+import { fmt, NAIRA, INPUT_CLS, LABEL_CLS, BTN_PRIMARY, BTN_SECONDARY } from './sales-utils';
+import { ModalDialog } from './modal-dialog';
+
+type SelectedFormCustomer = Customer & {
+  avgOrder: number;
+  lastSale: string | null;
+  credit?: { totalOutstanding: number; overdueCount?: number };
+};
+
+export interface AddSaleModalProps {
+  show: boolean;
+  onClose: () => void;
+  hubScope: HubScopeFilter;
+  selectedHub: string;
+  setSelectedHub: (hub: string) => void;
+  newSale: Partial<Sale>;
+  setNewSale: React.Dispatch<React.SetStateAction<Partial<Sale>>>;
+  customers: Customer[];
+  touched: Record<string, boolean>;
+  setTouched: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  validationErrors: Record<string, string>;
+  selectedFormCustomer: SelectedFormCustomer | null;
+  customerCreditWarning: string | null;
+  selectedProductId: string;
+  setSelectedProductId: (id: string) => void;
+  handleProductChange: (productId: string) => void;
+  availableInventory: InventoryItem[];
+  selectedInventoryItem: InventoryItem | undefined;
+  quantity: number;
+  handleQuantityChange: (qty: number) => void;
+  paymentMode: PaymentMode;
+  setPaymentMode: (mode: PaymentMode) => void;
+  amountPaid: number;
+  setAmountPaid: (amount: number) => void;
+  dueDate: string;
+  setDueDate: (date: string) => void;
+  paymentType: PaymentType;
+  setPaymentType: (type: PaymentType) => void;
+  agents: Agent[];
+  user: AppUser | null;
+  handleSaveSale: () => void;
+  isFormValid: boolean;
+}
+
+export function AddSaleModal({
+  show,
+  onClose,
+  hubScope,
+  selectedHub,
+  setSelectedHub,
+  newSale,
+  setNewSale,
+  customers,
+  touched,
+  setTouched,
+  validationErrors,
+  selectedFormCustomer,
+  customerCreditWarning,
+  selectedProductId,
+  setSelectedProductId,
+  handleProductChange,
+  availableInventory,
+  selectedInventoryItem,
+  quantity,
+  handleQuantityChange,
+  paymentMode,
+  setPaymentMode,
+  amountPaid,
+  setAmountPaid,
+  dueDate,
+  setDueDate,
+  paymentType,
+  setPaymentType,
+  agents,
+  user,
+  handleSaveSale,
+  isFormValid,
+}: Readonly<AddSaleModalProps>) {
+  if (!show) return null;
+
+  return (
+    <ModalDialog onClose={onClose}>
+      <div className="relative z-10 w-full max-w-lg rounded-md border bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">Record New Sale</h2>
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
+        </div>
+        <div className="space-y-4">
+          {/* Hub & Channel */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label htmlFor="sale-hub" className={LABEL_CLS}>Hub Location</label>
+              {hubScope.canSwitchHubs ? (
+                <select id="sale-hub" value={selectedHub} onChange={(e) => { setSelectedHub(e.target.value); setSelectedProductId(''); }} className={INPUT_CLS}>
+                  {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                </select>
+              ) : (
+                <input id="sale-hub" type="text" readOnly disabled value={hubScope.hubName} className={`${INPUT_CLS} opacity-80 cursor-not-allowed`} />
+              )}
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="sale-channel" className={LABEL_CLS}>Sales Channel</label>
+              <select id="sale-channel" value={newSale.channel || SalesChannel.WALK_IN} onChange={(e) => { const ch = e.target.value as SalesChannel; setNewSale({ ...newSale, channel: ch, deliveryStatus: ch === SalesChannel.DELIVERY ? DeliveryStatus.PENDING : DeliveryStatus.NOT_APPLICABLE }); }} className={INPUT_CLS}>
+                {Object.values(SalesChannel).map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Delivery details (conditional) */}
+          {newSale.channel === SalesChannel.DELIVERY && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 rounded-md border border-dashed bg-muted/20">
+              <div className="space-y-2">
+                <label htmlFor="sale-delivery-address" className={LABEL_CLS}>Delivery Address</label>
+                <input id="sale-delivery-address" type="text" value={newSale.deliveryAddress || ''} onChange={(e) => setNewSale({ ...newSale, deliveryAddress: e.target.value })} placeholder="Enter address" className={INPUT_CLS} />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="sale-customer-phone" className={LABEL_CLS}>Customer Phone</label>
+                <input id="sale-customer-phone" type="text" value={newSale.customerPhone || ''} onChange={(e) => setNewSale({ ...newSale, customerPhone: e.target.value })} placeholder="Phone for delivery" className={INPUT_CLS} />
+              </div>
+            </div>
+          )}
+
+          {/* Customer */}
+          <div className="space-y-2">
+            <label htmlFor="sale-customer" className={LABEL_CLS}>Customer *</label>
+            <select id="sale-customer" value={newSale.customerId || ''} onChange={(e) => { setNewSale({ ...newSale, customerId: e.target.value }); setTouched((t) => ({ ...t, customerId: true })); }} className={`${INPUT_CLS} ${touched.customerId && validationErrors.customerId ? 'border-red-500' : ''}`}>
+              <option value="">-- Select Customer --</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
+            </select>
+            {touched.customerId && validationErrors.customerId && <p className="text-xs text-red-500">{validationErrors.customerId}</p>}
+          </div>
+
+          {/* Customer context card */}
+          {selectedFormCustomer && (
+            <div className="p-3 rounded-md border bg-muted/20 text-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium">{selectedFormCustomer.name}</span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${selectedFormCustomer.type === 'B2B' ? 'bg-secondary text-secondary-foreground' : 'bg-primary/10 text-primary'}`}>{selectedFormCustomer.type}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                <div><span className="block font-medium text-foreground">{selectedFormCustomer.totalOrders}</span>orders</div>
+                <div><span className="block font-medium text-foreground">{fmt(selectedFormCustomer.totalSpent)}</span>total spent</div>
+                <div><span className="block font-medium text-foreground">{fmt(Math.round(selectedFormCustomer.avgOrder))}</span>avg order</div>
+              </div>
+              {selectedFormCustomer.lastSale && <p className="text-xs text-muted-foreground mt-1">Last purchase: {selectedFormCustomer.lastSale}</p>}
+              {selectedFormCustomer.credit && selectedFormCustomer.credit.totalOutstanding > 0 && (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-orange-700 bg-orange-50 p-1.5 rounded">
+                  <AlertTriangle size={12} /> Outstanding credit: {fmt(selectedFormCustomer.credit.totalOutstanding)}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Credit warning — shown when customer has outstanding credit, regardless of credit toggle */}
+          {customerCreditWarning && (
+            <div className="flex items-start gap-2 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-800">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <span>{customerCreditWarning}</span>
+            </div>
+          )}
+
+          {/* Product */}
+          <div className="space-y-2">
+            <label htmlFor="sale-product" className={LABEL_CLS}>Product *</label>
+            <select id="sale-product" value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={`${INPUT_CLS} ${touched.productId && validationErrors.productId ? 'border-red-500' : ''}`}>
+              <option value="">-- Select Product --</option>{availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name} (Stock: {i.currentStock} {i.unitOfMeasure})</option>)}
+            </select>
+            {touched.productId && validationErrors.productId && <p className="text-xs text-red-500">{validationErrors.productId}</p>}
+            {selectedInventoryItem && (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className={`font-medium ${selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel ? 'text-red-600' : 'text-green-600'}`}>
+                  {selectedInventoryItem.currentStock} {selectedInventoryItem.unitOfMeasure} in stock
+                </span>
+                <span>&middot; {fmt(selectedInventoryItem.baseSellingPrice)}/{selectedInventoryItem.unitOfMeasure}</span>
+                {selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel && (
+                  <span className="text-red-500 font-medium flex items-center gap-1"><AlertTriangle size={10} /> Low stock</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quantity & Amount */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label htmlFor="sale-quantity" className={LABEL_CLS}>Quantity</label>
+              <input id="sale-quantity" type="number" min={1} max={selectedInventoryItem?.currentStock || undefined} value={quantity} onChange={(e) => handleQuantityChange(Number.parseInt(e.target.value, 10) || 0)} className={`${INPUT_CLS} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`} />
+              {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA})</label>
+              <input id="sale-amount" type="number" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: Number.parseInt(e.target.value, 10) || 0 })} className={INPUT_CLS} />
+            </div>
+          </div>
+          {/* Live price breakdown */}
+          {selectedInventoryItem && quantity > 0 && (
+            <div className="text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2 flex items-center gap-3 flex-wrap">
+              <span>{quantity} &times; {fmt(selectedInventoryItem.baseSellingPrice)} = <span className="font-medium text-foreground">{fmt(selectedInventoryItem.baseSellingPrice * quantity)}</span></span>
+              {Number(newSale.amount) !== selectedInventoryItem.baseSellingPrice * quantity && (
+                <span className="text-orange-600 font-medium">Custom price applied ({fmt(Number(newSale.amount))})</span>
+              )}
+            </div>
+          )}
+
+          {/* Payment Mode */}
+          <fieldset className="border-0 p-0 m-0 space-y-2">
+            <legend className={LABEL_CLS}>Amount Paid *</legend>
+            <div className="flex items-center gap-2">
+              {Object.values(PaymentMode).map((mode) => (
+                <button key={mode} type="button" onClick={() => {
+                  setPaymentMode(mode);
+                  if (mode === PaymentMode.FULL_PAYMENT) { setAmountPaid(Number(newSale.amount) || 0); }
+                  else if (mode === PaymentMode.FULL_CREDIT) { setAmountPaid(0); }
+                }} className={`flex-1 py-2 px-3 rounded-md text-xs font-medium border transition-colors ${paymentMode === mode ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          {/* Amount paid input (only for partial credit) */}
+          {paymentMode === PaymentMode.PARTIAL_CREDIT && (
+            <div className="space-y-2">
+              <label htmlFor="sale-amount-paid" className={LABEL_CLS}>Amount Paid Now ({NAIRA})</label>
+              <input id="sale-amount-paid" type="number" min={0} max={Number(newSale.amount) || undefined} value={amountPaid} onChange={(e) => setAmountPaid(Number.parseInt(e.target.value, 10) || 0)} className={INPUT_CLS} />
+              {Number(newSale.amount) > 0 && (
+                <p className="text-xs text-orange-600 font-medium">Balance on credit: {fmt(Math.max(0, Number(newSale.amount) - amountPaid))}</p>
+              )}
+            </div>
+          )}
+
+          {(paymentMode === PaymentMode.FULL_CREDIT || paymentMode === PaymentMode.PARTIAL_CREDIT) && (
+            <div className="space-y-2">
+              <label htmlFor="sale-due-date" className={LABEL_CLS}>Due Date *</label>
+              <input
+                id="sale-due-date"
+                type="date"
+                value={dueDate}
+                onChange={(e) => { setDueDate(e.target.value); setTouched((t) => ({ ...t, dueDate: true })); }}
+                className={`${INPUT_CLS} ${touched.dueDate && validationErrors.dueDate ? 'border-red-500' : ''}`}
+              />
+              {touched.dueDate && validationErrors.dueDate && <p className="text-xs text-red-500">{validationErrors.dueDate}</p>}
+            </div>
+          )}
+
+          {/* Credit warning for partial/full credit */}
+          {(paymentMode === PaymentMode.FULL_CREDIT || paymentMode === PaymentMode.PARTIAL_CREDIT) && customerCreditWarning && (
+            <div className="flex items-start gap-2 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-800">
+              <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+              <span>{customerCreditWarning} — Proceeding with credit sale.</span>
+            </div>
+          )}
+
+          {/* Payment Type */}
+          {paymentMode !== PaymentMode.FULL_CREDIT && (
+            <fieldset className="border-0 p-0 m-0 space-y-2">
+              <legend className={LABEL_CLS}>Payment Type</legend>
+              <div className="flex items-center gap-2">
+                {Object.values(PaymentType).map((type) => (
+                  <button key={type} type="button" onClick={() => setPaymentType(type)} className={`flex-1 py-2 px-3 rounded-md text-xs font-medium border transition-colors ${paymentType === type ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
+          {/* Date & Agent */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label htmlFor="sale-date" className={LABEL_CLS}>Date</label>
+              <input id="sale-date" type="date" value={newSale.date || ''} onChange={(e) => setNewSale({ ...newSale, date: e.target.value })} className={INPUT_CLS} />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="sale-agent" className={LABEL_CLS}>Agent</label>
+              <select id="sale-agent" value={newSale.agentId || user?.id || ''} onChange={(e) => setNewSale({ ...newSale, agentId: e.target.value })} className={INPUT_CLS}>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div className="space-y-2">
+            <label htmlFor="sale-notes" className={LABEL_CLS}>Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
+            <textarea id="sale-notes" value={newSale.notes || ''} onChange={(e) => setNewSale({ ...newSale, notes: e.target.value })} placeholder="Internal comments..." rows={2} className={`${INPUT_CLS} h-auto resize-none`} />
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onClose} className={BTN_SECONDARY}>Cancel</button>
+          <button type="button" onClick={handleSaveSale} disabled={!isFormValid} className={`${BTN_PRIMARY} disabled:opacity-50 disabled:cursor-not-allowed`}>Record Sale</button>
+        </div>
+      </div>
+    </ModalDialog>
+  );
+}
