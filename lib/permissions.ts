@@ -66,7 +66,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: 'inventory.edit', label: 'Edit product details' },
       { key: 'inventory.adjust_stock', label: 'Adjust stock levels' },
       { key: 'inventory.transfer', label: 'Transfer between hubs' },
-      { key: 'inventory.import', label: 'Import CSV' },
+      { key: 'inventory.import', label: 'Import movements (Excel)' },
       { key: 'inventory.export', label: 'Export CSV' },
     ],
   },
@@ -89,7 +89,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: 'sales.void', label: 'Void a sale' },
       { key: 'sales.update_status', label: 'Update payment status' },
       { key: 'sales.update_delivery', label: 'Update delivery status' },
-      { key: 'sales.import', label: 'Import sales CSV' },
+      { key: 'sales.import', label: 'Import sales (Excel)' },
     ],
   },
   {

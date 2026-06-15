@@ -55,6 +55,9 @@ export interface AddSaleModalProps {
   user: AppUser | null;
   handleSaveSale: () => void;
   isFormValid: boolean;
+  isHistoricalSale: boolean;
+  productDetailsText: string;
+  setProductDetailsText: (value: string) => void;
 }
 
 export function AddSaleModal({
@@ -90,6 +93,9 @@ export function AddSaleModal({
   user,
   handleSaveSale,
   isFormValid,
+  isHistoricalSale,
+  productDetailsText,
+  setProductDetailsText,
 }: Readonly<AddSaleModalProps>) {
   if (!show) return null;
 
@@ -173,13 +179,39 @@ export function AddSaleModal({
             </div>
           )}
 
+          {isHistoricalSale && (
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              Historical sale — stock will not be deducted. Enter amount and product description if not using catalog.
+            </div>
+          )}
+
           {/* Product */}
           <div className="space-y-2">
-            <label htmlFor="sale-product" className={LABEL_CLS}>Product *</label>
+            <label htmlFor="sale-product" className={LABEL_CLS}>
+              Product{isHistoricalSale ? '' : ' *'}
+            </label>
             <select id="sale-product" value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={`${INPUT_CLS} ${touched.productId && validationErrors.productId ? 'border-red-500' : ''}`}>
               <option value="">-- Select Product --</option>{availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name} (Stock: {i.currentStock} {i.unitOfMeasure})</option>)}
             </select>
             {touched.productId && validationErrors.productId && <p className="text-xs text-red-500">{validationErrors.productId}</p>}
+            {isHistoricalSale && !selectedProductId && (
+              <div className="space-y-1">
+                <label htmlFor="sale-product-details" className="text-xs font-medium text-muted-foreground">
+                  Product description
+                </label>
+                <input
+                  id="sale-product-details"
+                  type="text"
+                  value={productDetailsText}
+                  onChange={(e) => setProductDetailsText(e.target.value)}
+                  placeholder="e.g. 2 crates of tomatoes"
+                  className={`${INPUT_CLS} ${touched.productDetails && validationErrors.productDetails ? 'border-red-500' : ''}`}
+                />
+                {touched.productDetails && validationErrors.productDetails && (
+                  <p className="text-xs text-red-500">{validationErrors.productDetails}</p>
+                )}
+              </div>
+            )}
             {selectedInventoryItem && (
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span className={`font-medium ${selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel ? 'text-red-600' : 'text-green-600'}`}>
@@ -201,8 +233,9 @@ export function AddSaleModal({
               {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
             </div>
             <div className="space-y-2">
-              <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA})</label>
-              <input id="sale-amount" type="number" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: Number.parseInt(e.target.value, 10) || 0 })} className={INPUT_CLS} />
+              <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA}){isHistoricalSale ? ' *' : ''}</label>
+              <input id="sale-amount" type="number" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: Number.parseInt(e.target.value, 10) || 0 })} className={`${INPUT_CLS} ${touched.amount && validationErrors.amount ? 'border-red-500' : ''}`} />
+              {touched.amount && validationErrors.amount && <p className="text-xs text-red-500">{validationErrors.amount}</p>}
             </div>
           </div>
           {/* Live price breakdown */}

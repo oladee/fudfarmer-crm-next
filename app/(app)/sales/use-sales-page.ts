@@ -16,6 +16,9 @@ import {
   useStockLogs,
   useCreditSummary,
   useHubs,
+  useDownloadSalesImportTemplate,
+  useValidateSalesImport,
+  useImportSales,
 } from '@/hooks/use-queries';
 import {
   Sale,
@@ -31,7 +34,6 @@ import {
   getDateRange,
   creditWarningText,
   escapeCsvCell,
-  parseCsvFile,
   matchesSaleFilters,
   computeSalesKpis,
   getAmountPaidForMode,
@@ -42,8 +44,9 @@ import {
   type DetailTab,
   type QuickDatePreset,
   type SaleDateFieldFilter,
-  type CsvPreviewRow,
 } from './sales-utils';
+import type { SalesImportPreviewRow } from '@/types/api';
+import { isHistoricalDate } from '@/lib/historical-date';
 
 export function useSalesPage() {
   const { user } = useAuth();
@@ -76,7 +79,10 @@ export function useSalesPage() {
   const updateSale = useUpdateSale();
   const updateDeliveryStatusMutation = useUpdateDeliveryStatus();
   const voidSale = useVoidSale();
-  const csvInputRef = useRef<HTMLInputElement>(null);
+  const downloadTemplate = useDownloadSalesImportTemplate();
+  const validateImport = useValidateSalesImport();
+  const importSales = useImportSales();
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterAgent, setFilterAgent] = useState('All');
@@ -117,8 +123,8 @@ export function useSalesPage() {
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
 
   const [showImportModal, setShowImportModal] = useState(false);
-  const [csvPreview, setCsvPreview] = useState<CsvPreviewRow[]>([]);
-  const [csvErrors, setCsvErrors] = useState<string[]>([]);
+  const [importPreview, setImportPreview] = useState<SalesImportPreviewRow[]>([]);
+  const [importSummary, setImportSummary] = useState<{ total: number; valid: number; invalid: number } | null>(null);
   const [importing, setImporting] = useState(false);
 
   const availableInventory = useMemo(
@@ -130,19 +136,43 @@ export function useSalesPage() {
     [inventory, selectedProductId],
   );
 
+  const [productDetailsText, setProductDetailsText] = useState('');
+
+  const saleDateStr = newSale.date || new Date().toISOString().split('T')[0];
+  const isHistoricalSale = isHistoricalDate(saleDateStr);
+
   const validationErrors = useMemo(() => {
     const errors: Record<string, string> = {};
     if (!newSale.customerId) errors.customerId = 'Customer is required.';
-    if (!selectedProductId) errors.productId = 'Product is required.';
-    if (quantity <= 0) errors.quantity = 'Quantity must be greater than 0.';
-    if (selectedInventoryItem && quantity > selectedInventoryItem.currentStock) {
-      errors.quantity = `Exceeds stock (${selectedInventoryItem.currentStock}).`;
+    if (!isHistoricalSale) {
+      if (!selectedProductId) errors.productId = 'Product is required.';
+      if (quantity <= 0) errors.quantity = 'Quantity must be greater than 0.';
+      if (selectedInventoryItem && quantity > selectedInventoryItem.currentStock) {
+        errors.quantity = `Exceeds stock (${selectedInventoryItem.currentStock}).`;
+      }
+    } else {
+      if (!selectedProductId && !productDetailsText.trim()) {
+        errors.productDetails = 'Enter a product description or select a catalog product.';
+      }
+      if (!newSale.amount || newSale.amount <= 0) {
+        errors.amount = 'Amount is required for historical sales.';
+      }
     }
     if (paymentMode !== PaymentMode.FULL_PAYMENT && !dueDate) {
       errors.dueDate = 'Due date is required for credit sales.';
     }
     return errors;
-  }, [newSale.customerId, selectedProductId, quantity, selectedInventoryItem, paymentMode, dueDate]);
+  }, [
+    newSale.customerId,
+    newSale.amount,
+    selectedProductId,
+    quantity,
+    selectedInventoryItem,
+    paymentMode,
+    dueDate,
+    isHistoricalSale,
+    productDetailsText,
+  ]);
   const isFormValid = Object.keys(validationErrors).length === 0;
 
   const customerCreditWarning = useMemo(() => {
@@ -269,19 +299,29 @@ export function useSalesPage() {
     d.setDate(d.getDate() + 30);
     setDueDate(d.toISOString().split('T')[0]);
     setTouched({});
+    setProductDetailsText('');
   };
 
   const handleSaveSale = () => {
-    setTouched({ customerId: true, productId: true, quantity: true, dueDate: true });
+    const touchFields: Record<string, boolean> = {
+      customerId: true,
+      dueDate: true,
+      ...(isHistoricalSale
+        ? { productDetails: true, amount: true }
+        : { productId: true, quantity: true }),
+    };
+    setTouched(touchFields);
     if (!isFormValid) {
       toast.error('Please fix validation errors.');
       return;
     }
 
     const inventoryItem = inventory.find((i) => i.id === selectedProductId);
-    if (!inventoryItem || inventoryItem.currentStock < quantity) {
-      toast.error(`Insufficient stock in ${selectedHub}.`);
-      return;
+    if (!isHistoricalSale) {
+      if (!inventoryItem || inventoryItem.currentStock < quantity) {
+        toast.error(`Insufficient stock in ${selectedHub}.`);
+        return;
+      }
     }
 
     const amount = Number(newSale.amount);
@@ -312,7 +352,12 @@ export function useSalesPage() {
         notes: newSale.notes || undefined,
         ...(isAdmin ? { profit_margin: profitMargin, profit_amount: profitAmount } : {}),
         date: saleDate,
-        items: [{ product_id: selectedProductId, quantity, unit_price: amount / quantity }],
+        ...(isHistoricalSale && !selectedProductId
+          ? { product_details: productDetailsText.trim() }
+          : {}),
+        ...(selectedProductId && quantity > 0
+          ? { items: [{ product_id: selectedProductId, quantity, unit_price: amount / quantity }] }
+          : {}),
       },
       {
         onSuccess: (result) => {
@@ -443,55 +488,60 @@ export function useSalesPage() {
     toast.success(`Exported ${filteredSales.length} sales.`);
   };
 
-  const handleCsvFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDownloadTemplate = () => {
+    downloadTemplate.mutate(undefined, {
+      onSuccess: () => toast.success('Template downloaded.'),
+      onError: (err) => toast.error(err.message || 'Failed to download template.'),
+    });
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const { rows, errors } = await parseCsvFile(file);
-    setCsvPreview(rows);
-    setCsvErrors(errors);
-    if (rows.length > 0 || errors.length > 0) setShowImportModal(true);
     e.target.value = '';
+    setShowImportModal(true);
+    setImportPreview([]);
+    setImportSummary(null);
+    validateImport.mutate(file, {
+      onSuccess: (data) => {
+        setImportPreview(data.rows);
+        setImportSummary(data.summary);
+        if (data.summary.total === 0) {
+          toast.error('No data rows found on the Sales sheet.');
+          setShowImportModal(false);
+        }
+      },
+      onError: (err) => {
+        toast.error(err.message || 'Validation failed.');
+        setShowImportModal(false);
+      },
+    });
   };
 
   const handleImportConfirm = async () => {
-    setImporting(true);
-    let imported = 0;
-    for (const row of csvPreview) {
-      const amount = Number(row.amount) || 0;
-      const margin = Number(row['margin %'] || row.margin || '20');
-      const matchedCustomer = customers.find(
-        (c) => c.name.toLowerCase() === String(row.customer || '').toLowerCase(),
-      );
-      if (!matchedCustomer) continue;
-      const isCreditRow = String(row.credit || '').toLowerCase() === 'yes';
-      const payment_mode = isCreditRow ? PaymentMode.FULL_CREDIT : PaymentMode.FULL_PAYMENT;
-      const d = new Date();
-      d.setDate(d.getDate() + 30);
-      const importHubId = resolveHubId(hubScope.hubName || selectedHub);
-      if (!importHubId) continue;
-      try {
-        await createSale.mutateAsync({
-          customer_id: matchedCustomer.id,
-          hub_id: importHubId,
-          amount,
-          payment_mode,
-          due_date: isCreditRow ? d.toISOString().split('T')[0] : undefined,
-          ...(isAdmin ? { profit_margin: margin, profit_amount: (amount * margin) / 100 } : {}),
-          date: String(row.date),
-          notes: String(row.notes || 'Imported from CSV'),
-          channel: String(row.channel || SalesChannel.WALK_IN),
-          delivery_status: String(row.delivery || DeliveryStatus.NOT_APPLICABLE),
-        });
-        imported += 1;
-      } catch {
-        // skip failed rows
-      }
+    const rows = importPreview.filter((r) => r.valid && r.resolved).map((r) => r.resolved!);
+    if (rows.length === 0) {
+      toast.error('No valid rows to import.');
+      return;
     }
-    setImporting(false);
-    setShowImportModal(false);
-    setCsvPreview([]);
-    setCsvErrors([]);
-    toast.success(`Imported ${imported} sales.`);
+    setImporting(true);
+    importSales.mutate(rows, {
+      onSuccess: (result) => {
+        setImporting(false);
+        setShowImportModal(false);
+        setImportPreview([]);
+        setImportSummary(null);
+        if (result.failed > 0) {
+          toast.warning(`Imported ${result.imported} sales. ${result.failed} failed.`);
+        } else {
+          toast.success(`Imported ${result.imported} sales.`);
+        }
+      },
+      onError: (err) => {
+        setImporting(false);
+        toast.error(err.message || 'Import failed.');
+      },
+    });
   };
 
   const saleStockLogs = useMemo(() => {
@@ -575,6 +625,9 @@ export function useSalesPage() {
     touched,
     setTouched,
     validationErrors,
+    productDetailsText,
+    setProductDetailsText,
+    isHistoricalSale,
     isFormValid,
     customerCreditWarning,
     selectedFormCustomer,
@@ -586,14 +639,17 @@ export function useSalesPage() {
     resetForm,
     showImportModal,
     setShowImportModal,
-    csvPreview,
-    setCsvPreview,
-    csvErrors,
-    setCsvErrors,
+    importPreview,
+    setImportPreview,
+    importSummary,
+    setImportSummary,
     importing,
-    handleCsvFile,
+    validating: validateImport.isPending,
+    handleDownloadTemplate,
+    handleImportFile,
     handleImportConfirm,
-    csvInputRef,
+    importInputRef,
+    downloadingTemplate: downloadTemplate.isPending,
     handleExport,
     searchTerm,
     setSearchTerm,

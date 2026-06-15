@@ -13,7 +13,7 @@ import {
 import { useSalesPage } from './use-sales-page';
 import { SaleDetailPanel } from './sale-detail-panel';
 import { AddSaleModal } from './add-sale-modal';
-import { CsvImportModal } from './csv-import-modal';
+import { SalesImportModal } from './sales-import-modal';
 import type { Sale } from '@/types';
 
 type SalesTableRowProps = Readonly<{
@@ -82,11 +82,13 @@ export default function SalesPage() {
     showAddModal, setShowAddModal, newSale, setNewSale, selectedHub, setSelectedHub,
     selectedProductId, setSelectedProductId, quantity, paymentMode, setPaymentMode,
     paymentType, setPaymentType, amountPaid, setAmountPaid, dueDate, setDueDate,
-    touched, setTouched, validationErrors, isFormValid, customerCreditWarning,
+    touched, setTouched, validationErrors, isFormValid, isHistoricalSale,
+    productDetailsText, setProductDetailsText, customerCreditWarning,
     selectedFormCustomer, availableInventory, selectedInventoryItem,
     handleProductChange, handleQuantityChange, handleSaveSale,
-    showImportModal, setShowImportModal, csvPreview, setCsvPreview, csvErrors, setCsvErrors,
-    importing, handleCsvFile, handleImportConfirm, csvInputRef, handleExport,
+    showImportModal, setShowImportModal, importPreview, setImportPreview, importSummary, setImportSummary,
+    importing, validating, handleDownloadTemplate, handleImportFile, handleImportConfirm, importInputRef,
+    downloadingTemplate, handleExport,
     btnPrimary, btnSecondary,
   } = useSalesPage();
 
@@ -98,8 +100,8 @@ export default function SalesPage() {
 
   const closeImportModal = () => {
     setShowImportModal(false);
-    setCsvPreview([]);
-    setCsvErrors([]);
+    setImportPreview([]);
+    setImportSummary(null);
   };
 
   const kpiCards = [
@@ -123,11 +125,21 @@ export default function SalesPage() {
           <p className="text-muted-foreground text-sm">Record, track, and analyze sales across all hubs.</p>
         </div>
         <div className="flex items-center gap-2">
-          <input ref={csvInputRef} type="file" accept=".csv" className="hidden" onChange={handleCsvFile} />
+          <input ref={importInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportFile} />
           {can('sales.import') && (
-            <button type="button" onClick={() => csvInputRef.current?.click()} className={btnSecondary}>
-              <Upload size={14} className="mr-1.5" /> Import CSV
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                disabled={downloadingTemplate}
+                className={btnSecondary}
+              >
+                <Download size={14} className="mr-1.5" /> Download Template
+              </button>
+              <button type="button" onClick={() => importInputRef.current?.click()} className={btnSecondary}>
+                <Upload size={14} className="mr-1.5" /> Import Sales
+              </button>
+            </>
           )}
           <button type="button" onClick={handleExport} className={btnSecondary}>
             <Download size={14} className="mr-1.5" /> Export
@@ -304,16 +316,20 @@ export default function SalesPage() {
         user={user}
         handleSaveSale={handleSaveSale}
         isFormValid={isFormValid}
+        isHistoricalSale={isHistoricalSale}
+        productDetailsText={productDetailsText}
+        setProductDetailsText={setProductDetailsText}
       />
 
-      <CsvImportModal
+      <SalesImportModal
         show={showImportModal}
         onClose={closeImportModal}
-        csvPreview={csvPreview}
-        csvErrors={csvErrors}
+        previewRows={importPreview}
+        summary={importSummary}
         importing={importing}
-        customers={customers}
+        validating={validating}
         onConfirm={handleImportConfirm}
+        onDownloadTemplate={handleDownloadTemplate}
       />
     </div>
   );

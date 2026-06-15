@@ -128,7 +128,9 @@ export function Sidebar() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[13px] font-medium truncate text-sidebar-foreground">{user.name}</p>
-              <p className="text-[10px] text-muted-foreground">{user.role} &middot; {user.hubName ?? 'All Hubs'}</p>
+              <p className="text-[10px] text-muted-foreground" title={user.roleName || undefined}>
+                {user.role} &middot; {user.hubName ?? 'All Hubs'}
+              </p>
             </div>
             <button
               onClick={logout}

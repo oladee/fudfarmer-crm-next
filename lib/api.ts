@@ -83,3 +83,41 @@ export const axiosDelete = async (endpoint: string, withAuth?: boolean) => {
     throw error;
   }
 };
+
+export const axiosGetBlob = async (endpoint: string, withAuth?: boolean) => {
+  try {
+    const res = await axios.get(`${base_url}${endpoint}`, {
+      withCredentials: withAuth,
+      responseType: 'arraybuffer',
+    });
+    return res.data as ArrayBuffer;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      throw new Error(error.response?.data?.message || error.message);
+    }
+    throw error;
+  }
+};
+
+export const axiosPostForm = async (
+  endpoint: string,
+  formData: FormData,
+  withAuth?: boolean,
+) => {
+  try {
+    const res = await axios.post(`${base_url}${endpoint}`, formData, {
+      withCredentials: withAuth,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  } catch (error) {
+    if (isAxiosError(error)) {
+      throw new Error(
+        Array.isArray(error.response?.data?.message)
+          ? error.response.data.message[0]
+          : error.response?.data?.message || 'An error occurred',
+      );
+    }
+    throw error;
+  }
+};

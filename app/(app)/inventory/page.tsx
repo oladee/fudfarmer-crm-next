@@ -8,8 +8,11 @@ import { usePermissions } from '@/hooks/use-permissions';
 import {
   useInventory, useCreateProduct, useUpdateProduct, useStockLogs,
   useRecordStockMove, useTransferStock, useBatchStockUpdate, useHubs,
+  useDownloadInventoryImportTemplate, useValidateInventoryImport, useImportInventory,
 } from '@/hooks/use-queries';
 import { InventoryItem, StockLog, StockMovementType } from '@/types';
+import type { InventoryImportPreviewRow } from '@/types/api';
+import { InventoryImportModal } from './inventory-import-modal';
 import { toast } from 'sonner';
 import {
   Plus, Box, Search, History, Package, AlertTriangle, Truck, Layers,
@@ -155,7 +158,10 @@ export default function InventoryPage() {
   const { user } = useAuth();
   const { can, isAdmin } = usePermissions();
   const hubScope = useHubScopeFilter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const downloadInventoryTemplate = useDownloadInventoryImportTemplate();
+  const validateInventoryImport = useValidateInventoryImport();
+  const importInventory = useImportInventory();
   const { data: items = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
   const { data: logs = [] } = useStockLogs({ hub_id: hubScope.hubIdForApi });
   const createProduct = useCreateProduct();
@@ -182,6 +188,10 @@ export default function InventoryPage() {
   const [showStockMoveModal, setShowStockMoveModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showActionDropdown, setShowActionDropdown] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importPreview, setImportPreview] = useState<InventoryImportPreviewRow[]>([]);
+  const [importSummary, setImportSummary] = useState<{ total: number; valid: number; invalid: number } | null>(null);
+  const [importingMovements, setImportingMovements] = useState(false);
 
   // Detail panel
   const [viewingDetailsItem, setViewingDetailsItem] = useState<InventoryItem | null>(null);
@@ -539,32 +549,68 @@ export default function InventoryPage() {
     });
   };
 
-  /* ──────── CSV UPLOAD ──────── */
+  /* ──────── EXCEL IMPORT ──────── */
 
-  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDownloadInventoryTemplate = () => {
+    downloadInventoryTemplate.mutate(undefined, {
+      onSuccess: () => toast.success('Template downloaded.'),
+      onError: (err) => toast.error(err.message || 'Failed to download template.'),
+    });
+  };
+
+  const handleInventoryImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      const lines = text.split('\n');
-      const updates: Record<string, { quantity: number; cost?: number }> = {};
-      const newSelectedIds = new Set<string>();
-      lines.slice(1).forEach((line) => {
-        const [sku, qty, cost] = line.split(',').map((s) => s.trim());
-        const item = items.find((i) => i.sku.toLowerCase() === sku?.toLowerCase());
-        if (item) {
-          updates[item.id] = { quantity: Number(qty) || 0, cost: Number(cost) || undefined };
-          newSelectedIds.add(item.id);
+    e.target.value = '';
+    setShowImportModal(true);
+    setImportPreview([]);
+    setImportSummary(null);
+    validateInventoryImport.mutate(file, {
+      onSuccess: (data) => {
+        setImportPreview(data.rows);
+        setImportSummary(data.summary);
+        if (data.summary.total === 0) {
+          toast.error('No data rows found on the Movements sheet.');
+          setShowImportModal(false);
         }
-      });
-      setBatchData((prev) => ({ ...prev, updates }));
-      setSelectedIds(newSelectedIds);
-      setIsSelectionMode(true);
-      setShowBatchModal(true);
-    };
-    reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+      },
+      onError: (err) => {
+        toast.error(err.message || 'Validation failed.');
+        setShowImportModal(false);
+      },
+    });
+  };
+
+  const handleInventoryImportConfirm = () => {
+    const rows = importPreview.filter((r) => r.valid && r.resolved).map((r) => r.resolved!);
+    if (rows.length === 0) {
+      toast.error('No valid rows to import.');
+      return;
+    }
+    setImportingMovements(true);
+    importInventory.mutate(rows, {
+      onSuccess: (result) => {
+        setImportingMovements(false);
+        setShowImportModal(false);
+        setImportPreview([]);
+        setImportSummary(null);
+        if (result.failed > 0) {
+          toast.warning(`Imported ${result.imported} movements. ${result.failed} failed.`);
+        } else {
+          toast.success(`Imported ${result.imported} movements.`);
+        }
+      },
+      onError: (err) => {
+        setImportingMovements(false);
+        toast.error(err.message || 'Import failed.');
+      },
+    });
+  };
+
+  const closeImportModal = () => {
+    setShowImportModal(false);
+    setImportPreview([]);
+    setImportSummary(null);
   };
 
   /* ──────── Shared input class ──────── */
@@ -629,13 +675,22 @@ export default function InventoryPage() {
                   )}
                   <div className="h-px bg-border my-1" />
                   {can('inventory.import') && (
-                    <button
-                      onClick={() => { fileInputRef.current?.click(); setShowActionDropdown(false); }}
-                      className="flex items-center gap-3 w-full px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
-                    >
-                      <Upload size={14} className="text-muted-foreground" />
-                      Import CSV
-                    </button>
+                    <>
+                      <button
+                        onClick={() => { handleDownloadInventoryTemplate(); setShowActionDropdown(false); }}
+                        className="flex items-center gap-3 w-full px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
+                      >
+                        <Download size={14} className="text-muted-foreground" />
+                        Download Template
+                      </button>
+                      <button
+                        onClick={() => { importInputRef.current?.click(); setShowActionDropdown(false); }}
+                        className="flex items-center gap-3 w-full px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
+                      >
+                        <Upload size={14} className="text-muted-foreground" />
+                        Import Movements
+                      </button>
+                    </>
                   )}
                   {can('inventory.export') && (
                     <button
@@ -741,11 +796,16 @@ export default function InventoryPage() {
                   {ALL_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <input type="file" accept=".csv" ref={fileInputRef} className="hidden" onChange={handleCsvUpload} />
+              <input type="file" accept=".xlsx" ref={importInputRef} className="hidden" onChange={handleInventoryImportFile} />
               {can('inventory.import') && (
-                <button onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-10 px-4 py-2">
-                  <Upload size={14} /> Import CSV
-                </button>
+                <>
+                  <button onClick={handleDownloadInventoryTemplate} className="inline-flex items-center gap-2 rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-10 px-4 py-2">
+                    <Download size={14} /> Template
+                  </button>
+                  <button onClick={() => importInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-10 px-4 py-2">
+                    <Upload size={14} /> Import
+                  </button>
+                </>
               )}
               {selectedIds.size > 0 && can('inventory.adjust_stock') && (
                 <button
@@ -1657,6 +1717,17 @@ export default function InventoryPage() {
           </div>
         </div>
       )}
+
+      <InventoryImportModal
+        show={showImportModal}
+        onClose={closeImportModal}
+        previewRows={importPreview}
+        summary={importSummary}
+        importing={importingMovements}
+        validating={validateInventoryImport.isPending}
+        onConfirm={handleInventoryImportConfirm}
+        onDownloadTemplate={handleDownloadInventoryTemplate}
+      />
     </div>
   );
 }

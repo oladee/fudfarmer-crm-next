@@ -455,3 +455,99 @@ export const EMPTY_ANALYTICS_OVERVIEW: AnalyticsOverviewData = {
     collectionTrend: [],
   },
 };
+
+export interface ApiBulkImportSaleRow {
+  lineNo: number;
+  customer_id: string;
+  hub_id: string;
+  product_id?: string;
+  quantity?: number;
+  amount: number;
+  unit_price?: number;
+  payment_mode: string;
+  amount_paid?: number;
+  due_date?: string;
+  payment_type?: string;
+  channel?: string;
+  delivery_status?: string;
+  delivery_address?: string;
+  notes?: string;
+  date?: string;
+  product_details?: string;
+  historical?: boolean;
+  profit_margin?: number;
+  profit_amount?: number;
+}
+
+export interface SalesImportPreviewRow {
+  lineNo: number;
+  date_sold: string;
+  customer_name: string;
+  hub_name: string;
+  product_name: string;
+  quantity: number;
+  payment_mode: string;
+  amount_paid?: number;
+  due_date?: string;
+  payment_type?: string;
+  channel?: string;
+  delivery_status?: string;
+  delivery_address?: string;
+  notes?: string;
+  margin_percent?: number;
+  amount?: number;
+  historical?: boolean;
+  valid: boolean;
+  errors: string[];
+  resolved?: ApiBulkImportSaleRow;
+}
+
+export interface SalesImportValidateResponse {
+  rows: SalesImportPreviewRow[];
+  summary: { total: number; valid: number; invalid: number };
+}
+
+export interface SalesImportResult {
+  imported: number;
+  failed: number;
+  results: { lineNo: number; success: boolean; error?: string }[];
+}
+
+export interface ApiBulkImportMovementRow {
+  lineNo: number;
+  hub_id: string;
+  product_id?: string;
+  movement_type: string;
+  quantity: number;
+  unit_cost?: number;
+  movement_date: string;
+  product_name?: string;
+  notes?: string;
+  historical?: boolean;
+}
+
+export interface InventoryImportPreviewRow {
+  lineNo: number;
+  movement_date: string;
+  hub_name: string;
+  product_name: string;
+  movement_type: string;
+  quantity: number;
+  unit_cost?: number;
+  notes?: string;
+  historical?: boolean;
+  valid: boolean;
+  errors: string[];
+  resolved?: ApiBulkImportMovementRow;
+}
+
+export interface InventoryImportValidateResponse {
+  rows: InventoryImportPreviewRow[];
+  summary: { total: number; valid: number; invalid: number };
+}
+
+export interface InventoryImportResult {
+  imported: number;
+  failed: number;
+  results: { lineNo: number; success: boolean; error?: string }[];
+}

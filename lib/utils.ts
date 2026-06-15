@@ -6,6 +6,21 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+function formatRoleSlug(name?: string): string | null {
+  if (!name) return null;
+  return name
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+/** Human-readable role from whoami / user API role object. */
+export function resolveUserRoleLabel(role?: { label?: string; name?: string } | null): string {
+  const label = role?.label?.trim();
+  if (label) return label;
+  return formatRoleSlug(role?.name) ?? 'User';
+}
+
 export function mapApiUser(u: ApiUser): AppUser {
   const hubName = u.hub?.name ?? null;
   return {
@@ -18,8 +33,8 @@ export function mapApiUser(u: ApiUser): AppUser {
     hubName,
     location: hubName ?? 'All Hubs',
     dataScope: u.data_scope,
-    role: u.role.label,
-    roleName: u.role.name,
+    role: resolveUserRoleLabel(u.role),
+    roleName: u.role?.name ?? '',
     permissions: u.permissions,
   };
 }

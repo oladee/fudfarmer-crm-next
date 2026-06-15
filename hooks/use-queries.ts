@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HAS_API, requireApi } from '@/lib/require-api';
-import { axiosGet, axiosPost, axiosPatch, axiosDelete } from '@/lib/api';
+import { axiosGet, axiosPost, axiosPatch, axiosDelete, axiosGetBlob, axiosPostForm } from '@/lib/api';
 import { mapApiUser } from '@/lib/utils';
 import {
   ApiUser,
@@ -27,6 +27,12 @@ import {
   DashboardMetricsData,
   AnalyticsOverviewData,
   EMPTY_ANALYTICS_OVERVIEW,
+  ApiBulkImportSaleRow,
+  SalesImportValidateResponse,
+  SalesImportResult,
+  ApiBulkImportMovementRow,
+  InventoryImportValidateResponse,
+  InventoryImportResult,
 } from '@/types/api';
 import {
   mapCreditCustomerSummary,
@@ -305,7 +311,10 @@ export function useUpdateAgent() {
         true,
       );
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agents'] });
+      qc.invalidateQueries({ queryKey: ['whoami'] });
+    },
   });
 }
 
@@ -467,6 +476,7 @@ export function useCreateSale() {
       profit_margin?: number;
       profit_amount?: number;
       date?: string;
+      product_details?: string;
       items?: { product_id: string; quantity: number; unit_price: number }[];
     }) => {
       const res = await axiosPost('sales', dto, true) as ApiListResponse<{ sale: ApiSale; credit_record?: ApiCreditRecord }>;
@@ -533,6 +543,105 @@ export function useVoidSale() {
       qc.invalidateQueries({ queryKey: ['stockLogs'] });
       invalidateCredits(qc);
     },
+  });
+}
+
+function invalidateSalesImportQueries(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ['sales'] });
+  qc.invalidateQueries({ queryKey: ['customers'] });
+  qc.invalidateQueries({ queryKey: ['inventory'] });
+  qc.invalidateQueries({ queryKey: ['stockLogs'] });
+  invalidateCredits(qc);
+  qc.invalidateQueries({ queryKey: ['dashboardMetrics'] });
+}
+
+export function useDownloadSalesImportTemplate() {
+  return useMutation({
+    mutationFn: async () => {
+      requireApi();
+      const buffer = await axiosGetBlob('sales/import/template', true);
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sales-import-template.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+}
+
+export function useValidateSalesImport() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      requireApi();
+      const form = new FormData();
+      form.append('file', file);
+      const res = await axiosPostForm('sales/import/validate', form, true) as ApiListResponse<SalesImportValidateResponse>;
+      return res.data;
+    },
+  });
+}
+
+export function useImportSales() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (rows: ApiBulkImportSaleRow[]) => {
+      requireApi();
+      const res = await axiosPost('sales/import', { rows }, true) as ApiListResponse<SalesImportResult>;
+      return res.data;
+    },
+    onSuccess: () => invalidateSalesImportQueries(qc),
+  });
+}
+
+function invalidateInventoryImportQueries(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ['inventory'] });
+  qc.invalidateQueries({ queryKey: ['stockLogs'] });
+  qc.invalidateQueries({ queryKey: ['dashboardMetrics'] });
+}
+
+export function useDownloadInventoryImportTemplate() {
+  return useMutation({
+    mutationFn: async () => {
+      requireApi();
+      const buffer = await axiosGetBlob('inventory/import/template', true);
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'inventory-import-template.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+}
+
+export function useValidateInventoryImport() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      requireApi();
+      const form = new FormData();
+      form.append('file', file);
+      const res = await axiosPostForm('inventory/import/validate', form, true) as ApiListResponse<InventoryImportValidateResponse>;
+      return res.data;
+    },
+  });
+}
+
+export function useImportInventory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (rows: ApiBulkImportMovementRow[]) => {
+      requireApi();
+      const res = await axiosPost('inventory/import', { rows }, true) as ApiListResponse<InventoryImportResult>;
+      return res.data;
+    },
+    onSuccess: () => invalidateInventoryImportQueries(qc),
   });
 }
 
