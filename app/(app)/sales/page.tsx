@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { HubScopeSelect } from '@/components/hub-scope-filter';
 import { SalesChannel, PaymentMode } from '@/types';
 import {
@@ -91,6 +92,7 @@ export default function SalesPage() {
     downloadingTemplate, handleExport,
     btnPrimary, btnSecondary,
   } = useSalesPage();
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
 
   const openSaleDetail = (sale: Sale) => {
     setSelectedSale(sale);
@@ -128,14 +130,48 @@ export default function SalesPage() {
           <input ref={importInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleImportFile} />
           {can('sales.import') && (
             <>
-              <button
-                type="button"
-                onClick={handleDownloadTemplate}
-                disabled={downloadingTemplate}
-                className={btnSecondary}
-              >
-                <Download size={14} className="mr-1.5" /> Download Template
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowTemplateMenu((open) => !open)}
+                  disabled={downloadingTemplate}
+                  className={btnSecondary}
+                >
+                  <Download size={14} className="mr-1.5" /> Download Template
+                </button>
+                {showTemplateMenu && (
+                  <>
+                    <button
+                      type="button"
+                      aria-label="Close template menu"
+                      className="fixed inset-0 z-40 cursor-default"
+                      onClick={() => setShowTemplateMenu(false)}
+                    />
+                    <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-md border bg-card shadow-lg py-1 animate-in fade-in zoom-in-95 duration-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDownloadTemplate('catalog');
+                          setShowTemplateMenu(false);
+                        }}
+                        className="w-full px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
+                      >
+                        Catalog Sales Template
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDownloadTemplate('custom');
+                          setShowTemplateMenu(false);
+                        }}
+                        className="w-full px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
+                      >
+                        Custom Product Template
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <button type="button" onClick={() => importInputRef.current?.click()} className={btnSecondary}>
                 <Upload size={14} className="mr-1.5" /> Import Sales
               </button>

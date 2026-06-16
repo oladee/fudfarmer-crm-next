@@ -346,6 +346,22 @@ export function mapAuditLog(l: ApiAuditLog, hubMap?: Record<string, string>): Au
     entityId: l.entity_id,
     details: l.details,
     location,
+    category: l.category,
+    bulkUpload: l.bulk_upload
+      ? {
+          domain: l.bulk_upload.domain,
+          importType: l.bulk_upload.import_type,
+          fileName: l.bulk_upload.file_name,
+          stage: l.bulk_upload.stage,
+          summary: l.bulk_upload.summary,
+          rows: l.bulk_upload.rows,
+          results: l.bulk_upload.results,
+          rowCount: l.bulk_upload.row_count,
+          resultCount: l.bulk_upload.result_count,
+          rowsTruncated: l.bulk_upload.rows_truncated,
+          resultsTruncated: l.bulk_upload.results_truncated,
+        }
+      : undefined,
   };
 }
 

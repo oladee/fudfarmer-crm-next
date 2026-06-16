@@ -488,9 +488,9 @@ export function useSalesPage() {
     toast.success(`Exported ${filteredSales.length} sales.`);
   };
 
-  const handleDownloadTemplate = () => {
-    downloadTemplate.mutate(undefined, {
-      onSuccess: () => toast.success('Template downloaded.'),
+  const handleDownloadTemplate = (type: 'catalog' | 'custom' = 'catalog') => {
+    downloadTemplate.mutate(type, {
+      onSuccess: () => toast.success(`${type === 'custom' ? 'Custom' : 'Catalog'} template downloaded.`),
       onError: (err) => toast.error(err.message || 'Failed to download template.'),
     });
   };

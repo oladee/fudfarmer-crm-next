@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useCustomers, useCreateCustomer, useUpdateCustomer, useAgents,
   useCustomerCredits, useSales, useFeedback, useEnquiries, useCompensations, useHubs,
+  useDownloadCustomerImportTemplate, useValidateCustomerImport, useImportCustomers,
 } from '@/hooks/use-queries';
 import {
   Customer, CustomerType, PREDEFINED_SEGMENTS,
-  CreditGrade, Sale, Feedback, Enquiry, Compensation,
+  CreditGrade,
 } from '@/types';
 import { toast } from 'sonner';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -21,9 +22,9 @@ import {
   Plus, Search, MapPin, Building2, User, Award, Crown, X,
   Filter, Phone, Mail, Calendar, Copy, Check,
   Edit3, Save, ShoppingCart, CreditCard, MessageSquare,
-  TrendingUp, Package, Truck, ChevronRight, AlertTriangle,
-  FileText, RefreshCw, ArrowUpRight, Clock,
-  Users, BarChart3, Heart,
+  Package, Truck, ChevronRight, AlertTriangle,
+  RefreshCw, Clock, Loader2,
+  Users, BarChart3, Heart, Upload, Download,
 } from 'lucide-react';
 
 type DetailTab = 'overview' | 'purchases' | 'credit' | 'interactions';
@@ -42,6 +43,10 @@ export default function CustomersPage() {
   const activeHubs = hubs.filter(h => h.isActive);
   const createCustomer = useCreateCustomer();
   const updateCustomer = useUpdateCustomer();
+  const downloadCustomerImportTemplate = useDownloadCustomerImportTemplate();
+  const validateCustomerImport = useValidateCustomerImport();
+  const importCustomers = useImportCustomers();
+  const customerImportInputRef = useRef<HTMLInputElement | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -55,6 +60,18 @@ export default function CustomersPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [newSegmentInput, setNewSegmentInput] = useState('');
   const [editSegmentInput, setEditSegmentInput] = useState('');
+  const [customerImportProgress, setCustomerImportProgress] = useState<{
+    stage: 'validating' | 'importing';
+    fileName: string;
+  } | null>(null);
+  const [customerImportSummary, setCustomerImportSummary] = useState<{
+    fileName: string;
+    total: number;
+    imported: number;
+    skipped: number;
+    invalid: number;
+    failed: number;
+  } | null>(null);
   const [customSegments, setCustomSegments] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     const stored = localStorage.getItem('fudfarmer_custom_segments');
@@ -148,7 +165,7 @@ export default function CustomersPage() {
   const activeSegments = useMemo(() => {
     const segs = new Set<string>();
     customers.forEach((c) => c.segments?.forEach((s) => segs.add(s)));
-    return Array.from(segs).sort();
+    return Array.from(segs).sort((a, b) => a.localeCompare(b));
   }, [customers]);
 
   const filteredCustomers = useMemo(() => customers.filter((c) => {
@@ -286,6 +303,51 @@ export default function CustomersPage() {
     setIsEditing(false);
   };
 
+  const handleCustomerImportFile = async (file?: File) => {
+    if (!file) return;
+    setCustomerImportSummary(null);
+    setCustomerImportProgress({ stage: 'validating', fileName: file.name });
+    try {
+      const validation = await validateCustomerImport.mutateAsync(file);
+      const skipped = validation.summary.skipped ?? 0;
+      const invalid = validation.summary.invalid ?? 0;
+      const rows = validation.rows
+        .filter((row) => row.valid && !row.skipped && row.resolved)
+        .map((row) => row.resolved);
+      if (rows.length === 0) {
+        setCustomerImportSummary({
+          fileName: file.name,
+          total: validation.summary.total ?? validation.rows.length,
+          imported: 0,
+          skipped,
+          invalid,
+          failed: 0,
+        });
+        toast.warning(`No new customers to import. ${skipped} row(s) skipped, ${invalid} invalid.`);
+        return;
+      }
+      setCustomerImportProgress({ stage: 'importing', fileName: file.name });
+      const result = await importCustomers.mutateAsync(rows) as { imported?: number; skipped?: number; failed?: number };
+      setCustomerImportSummary({
+        fileName: file.name,
+        total: validation.summary.total ?? validation.rows.length,
+        imported: result.imported ?? rows.length,
+        skipped: skipped + (result.skipped ?? 0),
+        invalid,
+        failed: result.failed ?? 0,
+      });
+      if (skipped > 0 || invalid > 0) {
+        toast.warning(`${skipped} duplicate row(s) skipped, ${invalid} invalid row(s) ignored.`);
+      }
+      toast.success(`Imported ${result.imported ?? rows.length} customer(s). ${result.skipped ?? 0} skipped, ${result.failed ?? 0} failed.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Customer import failed.');
+    } finally {
+      setCustomerImportProgress(null);
+      if (customerImportInputRef.current) customerImportInputRef.current.value = '';
+    }
+  };
+
   // --- Render ---
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -296,9 +358,24 @@ export default function CustomersPage() {
           <p className="text-muted-foreground text-sm">Manage your client base, segments, and loyalty tiers.</p>
         </div>
         {can('customers.create') && (
-          <button onClick={() => setShowAddModal(true)} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-10 px-4 py-2">
-            <Plus size={16} className="mr-2" /> Add Customer
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={customerImportInputRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={(event) => handleCustomerImportFile(event.target.files?.[0])}
+            />
+            <button onClick={() => downloadCustomerImportTemplate.mutate()} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-10 px-4 py-2">
+              <Download size={16} className="mr-2" /> Template
+            </button>
+            <button onClick={() => customerImportInputRef.current?.click()} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-10 px-4 py-2">
+              <Upload size={16} className="mr-2" /> Import
+            </button>
+            <button onClick={() => setShowAddModal(true)} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-10 px-4 py-2">
+              <Plus size={16} className="mr-2" /> Add Customer
+            </button>
+          </div>
         )}
       </div>
 
@@ -507,6 +584,69 @@ export default function CustomersPage() {
               <button onClick={() => setShowAddModal(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
               <button onClick={handleSaveCustomer} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2">Save Customer</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {customerImportProgress && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-lg border bg-card p-6 text-center shadow-xl">
+            <Loader2 size={32} className="mx-auto mb-4 animate-spin text-primary" />
+            <h2 className="text-lg font-bold">
+              {customerImportProgress.stage === 'validating' ? 'Validating customer upload' : 'Importing customers'}
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Please wait while we process <span className="font-medium text-foreground">{customerImportProgress.fileName}</span>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {customerImportSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold">Customer Upload Summary</h2>
+                <p className="mt-1 text-sm text-muted-foreground truncate">
+                  {customerImportSummary.fileName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCustomerImportSummary(null)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-md border p-3">
+                <span className="text-xs text-muted-foreground">Total rows</span>
+                <p className="text-xl font-bold">{customerImportSummary.total}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <span className="text-xs text-muted-foreground">Imported</span>
+                <p className="text-xl font-bold text-green-600">{customerImportSummary.imported}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <span className="text-xs text-muted-foreground">Skipped duplicates</span>
+                <p className="text-xl font-bold text-orange-600">{customerImportSummary.skipped}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <span className="text-xs text-muted-foreground">Invalid / failed</span>
+                <p className="text-xl font-bold text-red-600">
+                  {customerImportSummary.invalid + customerImportSummary.failed}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCustomerImportSummary(null)}
+              className="mt-5 inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Done
+            </button>
           </div>
         </div>
       )}

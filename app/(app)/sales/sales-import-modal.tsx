@@ -1,6 +1,6 @@
 'use client';
 
-import { Upload, X, Check, AlertCircle, Download } from 'lucide-react';
+import { Upload, X, Check, AlertCircle, Download, Loader2 } from 'lucide-react';
 import type { SalesImportPreviewRow } from '@/types/api';
 import { fmt, BTN_PRIMARY, BTN_SECONDARY } from '../sales/sales-utils';
 import { ModalDialog } from '../sales/modal-dialog';
@@ -13,7 +13,7 @@ export interface SalesImportModalProps {
   importing: boolean;
   validating: boolean;
   onConfirm: () => void;
-  onDownloadTemplate: () => void;
+  onDownloadTemplate: (type?: 'catalog' | 'custom') => void;
 }
 
 export function SalesImportModal({
@@ -30,6 +30,8 @@ export function SalesImportModal({
 
   const validRows = previewRows.filter((r) => r.valid);
   const hasInvalid = (summary?.invalid ?? 0) > 0;
+  const allCustom = previewRows.length > 0 && previewRows.every((r) => r.import_mode === 'custom');
+  const freshTemplateType: 'catalog' | 'custom' = allCustom ? 'custom' : 'catalog';
 
   let subtitle = `${previewRows.length} rows`;
   if (validating) subtitle = 'Validating workbook…';
@@ -37,9 +39,10 @@ export function SalesImportModal({
     subtitle = `${summary.total} rows — ${summary.valid} valid, ${summary.invalid} with errors`;
   }
 
+  const saleLabel = validRows.length === 1 ? 'Sale' : 'Sales';
   const importButtonLabel = importing
     ? 'Importing…'
-    : `Import ${validRows.length} Sale${validRows.length === 1 ? '' : 's'}`;
+    : `Import ${validRows.length} ${saleLabel}`;
 
   return (
     <ModalDialog onClose={onClose}>
@@ -63,7 +66,7 @@ export function SalesImportModal({
             </p>
             <button
               type="button"
-              onClick={onDownloadTemplate}
+              onClick={() => onDownloadTemplate(freshTemplateType)}
               className="text-orange-800 underline text-xs flex items-center gap-1 mt-1 hover:text-orange-900"
             >
               <Download size={12} /> Download a fresh template
@@ -73,9 +76,26 @@ export function SalesImportModal({
 
         <div className="mb-4 p-3 rounded-md border bg-muted/20 text-xs text-muted-foreground">
           <p className="font-medium text-foreground mb-1">Excel template columns:</p>
-          <p><strong>Live (today+):</strong> product_name + quantity required; stock is deducted.</p>
-          <p><strong>Historical (before today):</strong> amount required; product optional free text; no stock impact.</p>
+          {allCustom ? (
+            <>
+              <p><strong>Custom template:</strong> product_description + amount required.</p>
+              <p>Custom product rows never deduct stock, regardless of sale date.</p>
+            </>
+          ) : (
+            <>
+              <p><strong>Live (today+):</strong> product_name + quantity required; stock is deducted.</p>
+              <p><strong>Historical (before today):</strong> amount required; product optional free text; no stock impact.</p>
+            </>
+          )}
         </div>
+
+        {validating && previewRows.length === 0 && (
+          <div className="mb-4 rounded-md border bg-primary/5 p-6 text-center">
+            <Loader2 size={28} className="mx-auto mb-3 animate-spin text-primary" />
+            <p className="font-semibold">Uploading and validating workbook...</p>
+            <p className="mt-1 text-xs text-muted-foreground">Please wait while we read the selected Excel file.</p>
+          </div>
+        )}
 
         {previewRows.length > 0 && (
           <div className="rounded-md border overflow-hidden mb-4">
@@ -88,6 +108,7 @@ export function SalesImportModal({
                     <th className="h-8 px-3 text-left font-medium text-muted-foreground">Customer</th>
                     <th className="h-8 px-3 text-left font-medium text-muted-foreground">Hub</th>
                     <th className="h-8 px-3 text-left font-medium text-muted-foreground">Product</th>
+                    <th className="h-8 px-3 text-center font-medium text-muted-foreground">Type</th>
                     <th className="h-8 px-3 text-right font-medium text-muted-foreground">Qty</th>
                     <th className="h-8 px-3 text-right font-medium text-muted-foreground">Amount</th>
                     <th className="h-8 px-3 text-center font-medium text-muted-foreground">Hist.</th>
@@ -104,8 +125,13 @@ export function SalesImportModal({
                       <td className="px-3 py-2 whitespace-nowrap">{row.date_sold}</td>
                       <td className="px-3 py-2 font-medium">{row.customer_name}</td>
                       <td className="px-3 py-2">{row.hub_name}</td>
-                      <td className="px-3 py-2 text-muted-foreground truncate max-w-[180px]" title={row.product_name}>
-                        {row.product_name || '—'}
+                      <td className="px-3 py-2 text-muted-foreground truncate max-w-[180px]" title={row.product_description || row.product_name}>
+                        {row.product_description || row.product_name || '—'}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${row.import_mode === 'custom' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {row.import_mode === 'custom' ? 'Custom' : 'Catalog'}
+                        </span>
                       </td>
                       <td className="px-3 py-2 text-right">{row.quantity || '—'}</td>
                       <td className="px-3 py-2 text-right">

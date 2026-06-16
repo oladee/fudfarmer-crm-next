@@ -302,6 +302,20 @@ export interface ApiAuditLog {
   entity_type: string;
   entity_id?: string;
   details: string;
+  category?: string;
+  bulk_upload?: {
+    domain?: string;
+    import_type?: string;
+    file_name?: string;
+    stage?: string;
+    summary?: Record<string, unknown>;
+    rows?: unknown[];
+    results?: unknown[];
+    row_count?: number;
+    result_count?: number;
+    rows_truncated?: boolean;
+    results_truncated?: boolean;
+  };
   hub?: string | { hub_name?: string };
 }
 
@@ -475,6 +489,7 @@ export interface ApiBulkImportSaleRow {
   date?: string;
   product_details?: string;
   historical?: boolean;
+  import_mode?: 'catalog' | 'custom';
   profit_margin?: number;
   profit_amount?: number;
 }
@@ -485,7 +500,9 @@ export interface SalesImportPreviewRow {
   customer_name: string;
   hub_name: string;
   product_name: string;
+  product_description?: string;
   quantity: number;
+  unit?: string;
   payment_mode: string;
   amount_paid?: number;
   due_date?: string;
@@ -497,6 +514,7 @@ export interface SalesImportPreviewRow {
   margin_percent?: number;
   amount?: number;
   historical?: boolean;
+  import_mode?: 'catalog' | 'custom';
   valid: boolean;
   errors: string[];
   resolved?: ApiBulkImportSaleRow;

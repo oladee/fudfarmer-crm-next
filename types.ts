@@ -109,10 +109,24 @@ export interface AuditLog {
   userId: string;
   userName: string;
   action: string;
-  entityType: 'Inventory' | 'Sale' | 'Customer' | 'System';
+  entityType: 'Inventory' | 'Sale' | 'Customer' | 'BulkUpload' | 'System';
   entityId?: string;
   details: string;
   location: string;
+  category?: string;
+  bulkUpload?: {
+    domain?: string;
+    importType?: string;
+    fileName?: string;
+    stage?: string;
+    summary?: Record<string, unknown>;
+    rows?: unknown[];
+    results?: unknown[];
+    rowCount?: number;
+    resultCount?: number;
+    rowsTruncated?: boolean;
+    resultsTruncated?: boolean;
+  };
 }
 
 export const PREDEFINED_SEGMENTS = [

@@ -1,6 +1,6 @@
 'use client';
 
-import { Upload, X, Check, AlertCircle, Download } from 'lucide-react';
+import { Upload, X, Check, AlertCircle, Download, Loader2 } from 'lucide-react';
 import type { InventoryImportPreviewRow } from '@/types/api';
 import { BTN_PRIMARY, BTN_SECONDARY } from '../sales/sales-utils';
 import { ModalDialog } from '../sales/modal-dialog';
@@ -37,9 +37,10 @@ export function InventoryImportModal({
     subtitle = `${summary.total} rows — ${summary.valid} valid, ${summary.invalid} with errors`;
   }
 
+  const movementLabel = validRows.length === 1 ? 'Movement' : 'Movements';
   const importButtonLabel = importing
     ? 'Importing…'
-    : `Import ${validRows.length} Movement${validRows.length === 1 ? '' : 's'}`;
+    : `Import ${validRows.length} ${movementLabel}`;
 
   return (
     <ModalDialog onClose={onClose}>
@@ -76,6 +77,14 @@ export function InventoryImportModal({
           <p><strong>Live (today+):</strong> catalog product + quantity required; updates current stock.</p>
           <p><strong>Historical:</strong> backdated rows log only — current stock is not changed.</p>
         </div>
+
+        {validating && previewRows.length === 0 && (
+          <div className="mb-4 rounded-md border bg-primary/5 p-6 text-center">
+            <Loader2 size={28} className="mx-auto mb-3 animate-spin text-primary" />
+            <p className="font-semibold">Uploading and validating workbook...</p>
+            <p className="mt-1 text-xs text-muted-foreground">Please wait while we read the selected Excel file.</p>
+          </div>
+        )}
 
         {previewRows.length > 0 && (
           <div className="rounded-md border overflow-hidden mb-4">

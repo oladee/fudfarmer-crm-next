@@ -7,16 +7,16 @@ import type {
   SalesImportValidateResponse,
 } from '@/types/api';
 
-export async function downloadImportTemplate() {
+export async function downloadImportTemplate(type: 'catalog' | 'custom' = 'catalog') {
   requireApi();
-  const buffer = await axiosGetBlob('sales/import/template', true);
+  const buffer = await axiosGetBlob(`sales/import/template?type=${type}`, true);
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'sales-import-template.xlsx';
+  a.download = `sales-import-${type}-template.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }

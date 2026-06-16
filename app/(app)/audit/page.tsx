@@ -2,9 +2,11 @@
 
 import { useState, useMemo } from 'react';
 import { useAuditLogs } from '@/hooks/use-queries';
-import { History, Search, Filter, Box, Banknote, User, TrendingUp, Shield, Clock, CalendarDays } from 'lucide-react';
+import { History, Search, Filter, Box, Banknote, User, Shield, Clock, CalendarDays, Upload, X } from 'lucide-react';
+import type { AuditLog } from '@/types';
 
 type DatePreset = 'today' | '7days' | '30days' | 'all';
+type AuditTab = 'all' | 'bulk' | 'sales' | 'inventory' | 'customers';
 
 function getPresetRange(preset: DatePreset): { from: string; to: string } {
   const now = new Date();
@@ -24,10 +26,12 @@ export default function AuditTrailPage() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [activePreset, setActivePreset] = useState<DatePreset | null>('all');
+  const [activeTab, setActiveTab] = useState<AuditTab>('all');
+  const [selectedBulkLog, setSelectedBulkLog] = useState<AuditLog | null>(null);
 
   const uniqueAgents = useMemo(() => {
     const names = new Set(logs.map((l) => l.userName));
-    return Array.from(names).sort();
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [logs]);
 
   const applyPreset = (preset: DatePreset) => {
@@ -58,8 +62,19 @@ export default function AuditTrailPage() {
     return matchesSearch && matchesEntity && matchesAgent && matchesDate;
   }), [logs, searchTerm, filterEntity, filterAgent, dateFrom, dateTo]);
 
+  const bulkLogs = useMemo(
+    () => filteredLogs.filter((log) => log.category === 'bulk_upload' || log.bulkUpload),
+    [filteredLogs],
+  );
+
+  const visibleLogs = useMemo(() => {
+    if (activeTab === 'all') return filteredLogs;
+    if (activeTab === 'bulk') return bulkLogs;
+    return bulkLogs.filter((log) => log.bulkUpload?.domain === activeTab);
+  }, [activeTab, filteredLogs, bulkLogs]);
+
   const getEntityIcon = (type: string) => {
-    const map: Record<string, React.ReactNode> = { Inventory: <Box size={16} className="text-blue-500" />, Sale: <Banknote size={16} className="text-green-500" />, Customer: <User size={16} className="text-purple-500" /> };
+    const map: Record<string, React.ReactNode> = { Inventory: <Box size={16} className="text-blue-500" />, Sale: <Banknote size={16} className="text-green-500" />, Customer: <User size={16} className="text-purple-500" />, BulkUpload: <Upload size={16} className="text-indigo-500" /> };
     return map[type] || <Shield size={16} className="text-slate-500" />;
   };
 
@@ -69,6 +84,70 @@ export default function AuditTrailPage() {
     '30days': 'Last 30 Days',
     all: 'All',
   };
+
+  const tabs: { key: AuditTab; label: string; count: number }[] = [
+    { key: 'all', label: 'All Logs', count: filteredLogs.length },
+    { key: 'bulk', label: 'Bulk Uploads', count: bulkLogs.length },
+    { key: 'sales', label: 'Sales Uploads', count: bulkLogs.filter((l) => l.bulkUpload?.domain === 'sales').length },
+    { key: 'inventory', label: 'Inventory Uploads', count: bulkLogs.filter((l) => l.bulkUpload?.domain === 'inventory').length },
+    { key: 'customers', label: 'Customer Uploads', count: bulkLogs.filter((l) => l.bulkUpload?.domain === 'customers').length },
+  ];
+
+  const summaryNumber = (log: AuditLog, key: string) => {
+    const value = log.bulkUpload?.summary?.[key];
+    return typeof value === 'number' || typeof value === 'string' ? value : '—';
+  };
+
+  const renderBulkTable = () => (
+    <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 border-b text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+            <tr>
+              <th className="h-12 px-4 text-left">Time</th>
+              <th className="h-12 px-4 text-left">User</th>
+              <th className="h-12 px-4 text-left">Domain</th>
+              <th className="h-12 px-4 text-left">Type</th>
+              <th className="h-12 px-4 text-left">File</th>
+              <th className="h-12 px-4 text-left">Rows</th>
+              <th className="h-12 px-4 text-left">Processed</th>
+              <th className="h-12 px-4 text-left">Status</th>
+              <th className="h-12 px-4 text-left">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {visibleLogs.map((log) => (
+              <tr key={log.id} className="hover:bg-muted/30">
+                <td className="p-4 whitespace-nowrap">
+                  <span className="font-semibold">{new Date(log.timestamp).toLocaleDateString()}</span>
+                  <span className="block text-[10px] text-muted-foreground">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </td>
+                <td className="p-4">{log.userName}</td>
+                <td className="p-4 capitalize">{log.bulkUpload?.domain ?? '—'}</td>
+                <td className="p-4">{log.bulkUpload?.importType ?? '—'}</td>
+                <td className="p-4 max-w-[180px] truncate" title={log.bulkUpload?.fileName}>{log.bulkUpload?.fileName ?? '—'}</td>
+                <td className="p-4">
+                  {summaryNumber(log, 'total')} total
+                  <span className="block text-[10px] text-muted-foreground">
+                    {summaryNumber(log, 'valid')} valid / {summaryNumber(log, 'invalid')} invalid
+                  </span>
+                </td>
+                <td className="p-4">
+                  {summaryNumber(log, 'processed')} processed
+                  <span className="block text-[10px] text-muted-foreground">
+                    {summaryNumber(log, 'imported')} imported / {summaryNumber(log, 'failed')} failed
+                  </span>
+                </td>
+                <td className="p-4"><span className="px-2.5 py-1 rounded-md bg-secondary text-secondary-foreground text-xs font-bold uppercase border">{log.bulkUpload?.stage ?? log.action}</span></td>
+                <td className="p-4"><button type="button" onClick={() => setSelectedBulkLog(log)} className="text-primary text-xs font-semibold hover:underline">View rows</button></td>
+              </tr>
+            ))}
+            {visibleLogs.length === 0 && <tr><td colSpan={9} className="p-12 text-center text-muted-foreground italic">No bulk upload logs found.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -108,14 +187,27 @@ export default function AuditTrailPage() {
         </div>
       </div>
 
-      <p className="text-sm text-muted-foreground">Showing <span className="font-semibold text-foreground">{filteredLogs.length}</span> of <span className="font-semibold text-foreground">{logs.length}</span> entries</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${activeTab === tab.key ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'}`}
+          >
+            {tab.label} ({tab.count})
+          </button>
+        ))}
+      </div>
 
-      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+      <p className="text-sm text-muted-foreground">Showing <span className="font-semibold text-foreground">{visibleLogs.length}</span> of <span className="font-semibold text-foreground">{logs.length}</span> entries</p>
+
+      {activeTab === 'all' ? <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 border-b text-[10px] uppercase font-bold text-muted-foreground tracking-wider"><tr><th className="h-12 px-6 text-left">Timestamp</th><th className="h-12 px-6 text-left">Agent</th><th className="h-12 px-6 text-left">Entity</th><th className="h-12 px-6 text-left">Action</th><th className="h-12 px-6 text-left">Details</th></tr></thead>
             <tbody className="divide-y">
-              {filteredLogs.map((log) => (
+              {visibleLogs.map((log) => (
                 <tr key={log.id} className="hover:bg-muted/30">
                   <td className="p-6 whitespace-nowrap"><div className="flex flex-col"><span className="font-bold">{new Date(log.timestamp).toLocaleDateString()}</span><span className="text-[10px] text-muted-foreground flex items-center gap-1"><Clock size={10} /> {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div></td>
                   <td className="p-6"><div className="flex items-center gap-2"><div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary border">{log.userName.charAt(0)}</div><div className="flex flex-col"><span className="font-medium">{log.userName}</span><span className="text-[10px] text-muted-foreground uppercase">{log.location}</span></div></div></td>
@@ -124,11 +216,41 @@ export default function AuditTrailPage() {
                   <td className="p-6 text-muted-foreground italic text-xs max-w-xs truncate" title={log.details}>{log.details}</td>
                 </tr>
               ))}
-              {filteredLogs.length === 0 && <tr><td colSpan={5} className="p-12 text-center text-muted-foreground italic">No activity logs found.</td></tr>}
+              {visibleLogs.length === 0 && <tr><td colSpan={5} className="p-12 text-center text-muted-foreground italic">No activity logs found.</td></tr>}
             </tbody>
           </table>
         </div>
-      </div>
+      </div> : renderBulkTable()}
+
+      {selectedBulkLog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-5xl max-h-[85vh] overflow-y-auto rounded-lg border bg-card p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-lg font-bold">Bulk Upload Details</h2>
+                <p className="text-sm text-muted-foreground">{selectedBulkLog.details}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedBulkLog(null)} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-sm">
+              <div className="rounded-md border p-3"><span className="text-xs text-muted-foreground">Domain</span><p className="font-semibold capitalize">{selectedBulkLog.bulkUpload?.domain ?? '—'}</p></div>
+              <div className="rounded-md border p-3"><span className="text-xs text-muted-foreground">Type</span><p className="font-semibold">{selectedBulkLog.bulkUpload?.importType ?? '—'}</p></div>
+              <div className="rounded-md border p-3"><span className="text-xs text-muted-foreground">File</span><p className="font-semibold truncate">{selectedBulkLog.bulkUpload?.fileName ?? '—'}</p></div>
+              <div className="rounded-md border p-3"><span className="text-xs text-muted-foreground">Stage</span><p className="font-semibold">{selectedBulkLog.bulkUpload?.stage ?? selectedBulkLog.action}</p></div>
+            </div>
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="font-semibold mb-2">Uploaded / validated rows</h3>
+                <pre className="max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(selectedBulkLog.bulkUpload?.rows ?? [], null, 2)}</pre>
+              </div>
+              <div>
+                <h3 className="font-semibold mb-2">Results</h3>
+                <pre className="max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(selectedBulkLog.bulkUpload?.results ?? selectedBulkLog.bulkUpload?.summary ?? {}, null, 2)}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

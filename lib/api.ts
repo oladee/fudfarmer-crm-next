@@ -107,7 +107,6 @@ export const axiosPostForm = async (
   try {
     const res = await axios.post(`${base_url}${endpoint}`, formData, {
       withCredentials: withAuth,
-      headers: { 'Content-Type': 'multipart/form-data' },
     });
     return res.data;
   } catch (error) {

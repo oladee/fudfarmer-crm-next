@@ -417,6 +417,54 @@ export function useUpdateCustomer() {
   });
 }
 
+export function useDownloadCustomerImportTemplate() {
+  return useMutation({
+    mutationFn: async () => {
+      const buffer = await axiosGetBlob('customers/import/template', true);
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'customer-name-import-template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
+  });
+}
+
+export function useValidateCustomerImport() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await axiosPostForm('customers/import/validate', form, true) as ApiListResponse<{
+        rows: { valid: boolean; skipped?: boolean; resolved?: unknown; errors?: string[]; warnings?: string[] }[];
+        summary: Record<string, number>;
+      }> | {
+        rows: { valid: boolean; skipped?: boolean; resolved?: unknown; errors?: string[]; warnings?: string[] }[];
+        summary: Record<string, number>;
+      };
+      return unwrapImportResponse(res);
+    },
+  });
+}
+
+export function useImportCustomers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (rows: unknown[]) => unwrapImportResponse(await axiosPost('customers/import', { rows }, true)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      qc.invalidateQueries({ queryKey: ['auditLogs'] });
+      qc.invalidateQueries({ queryKey: ['dashboardMetrics'] });
+    },
+  });
+}
+
 export function useSegments() {
   return useQuery({
     queryKey: ['segments'],
@@ -555,18 +603,25 @@ function invalidateSalesImportQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['dashboardMetrics'] });
 }
 
+function unwrapImportResponse<T>(response: ApiListResponse<T> | T): T {
+  if (response && typeof response === 'object' && 'data' in response) {
+    return (response as ApiListResponse<T>).data;
+  }
+  return response as T;
+}
+
 export function useDownloadSalesImportTemplate() {
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (type: 'catalog' | 'custom' = 'catalog') => {
       requireApi();
-      const buffer = await axiosGetBlob('sales/import/template', true);
+      const buffer = await axiosGetBlob(`sales/import/template?type=${type}`, true);
       const blob = new Blob([buffer], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'sales-import-template.xlsx';
+      a.download = `sales-import-${type}-template.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     },
@@ -579,8 +634,8 @@ export function useValidateSalesImport() {
       requireApi();
       const form = new FormData();
       form.append('file', file);
-      const res = await axiosPostForm('sales/import/validate', form, true) as ApiListResponse<SalesImportValidateResponse>;
-      return res.data;
+      const res = await axiosPostForm('sales/import/validate', form, true) as ApiListResponse<SalesImportValidateResponse> | SalesImportValidateResponse;
+      return unwrapImportResponse(res);
     },
   });
 }
@@ -590,8 +645,8 @@ export function useImportSales() {
   return useMutation({
     mutationFn: async (rows: ApiBulkImportSaleRow[]) => {
       requireApi();
-      const res = await axiosPost('sales/import', { rows }, true) as ApiListResponse<SalesImportResult>;
-      return res.data;
+      const res = await axiosPost('sales/import', { rows }, true) as ApiListResponse<SalesImportResult> | SalesImportResult;
+      return unwrapImportResponse(res);
     },
     onSuccess: () => invalidateSalesImportQueries(qc),
   });
@@ -627,8 +682,8 @@ export function useValidateInventoryImport() {
       requireApi();
       const form = new FormData();
       form.append('file', file);
-      const res = await axiosPostForm('inventory/import/validate', form, true) as ApiListResponse<InventoryImportValidateResponse>;
-      return res.data;
+      const res = await axiosPostForm('inventory/import/validate', form, true) as ApiListResponse<InventoryImportValidateResponse> | InventoryImportValidateResponse;
+      return unwrapImportResponse(res);
     },
   });
 }
@@ -638,8 +693,8 @@ export function useImportInventory() {
   return useMutation({
     mutationFn: async (rows: ApiBulkImportMovementRow[]) => {
       requireApi();
-      const res = await axiosPost('inventory/import', { rows }, true) as ApiListResponse<InventoryImportResult>;
-      return res.data;
+      const res = await axiosPost('inventory/import', { rows }, true) as ApiListResponse<InventoryImportResult> | InventoryImportResult;
+      return unwrapImportResponse(res);
     },
     onSuccess: () => invalidateInventoryImportQueries(qc),
   });
@@ -1071,6 +1126,9 @@ export function useAuditLogs(filters?: {
   date_from?: string;
   date_to?: string;
   search?: string;
+  category?: string;
+  bulk_domain?: string;
+  import_type?: string;
   page?: number;
   limit?: number;
 }) {
