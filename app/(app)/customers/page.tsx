@@ -18,6 +18,7 @@ import type {
   CustomerImportRowStatus,
 } from '@/types/api';
 import { toast } from 'sonner';
+import { isPlaceholderEmail } from '@/lib/customer-helpers';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
@@ -235,8 +236,10 @@ export default function CustomersPage() {
   // --- Add Customer ---
   const handleSaveCustomer = () => {
     if (!newCustomer.name || !newCustomer.email) { toast.error('Please enter Name and Email.'); return; }
-    const dup = customers.find((c) => c.email.toLowerCase() === newCustomer.email!.toLowerCase());
-    if (dup) { toast.error(`A customer with email "${newCustomer.email}" already exists.`); return; }
+    if (!isPlaceholderEmail(newCustomer.email)) {
+      const dup = customers.find((c) => c.email.toLowerCase() === newCustomer.email!.toLowerCase());
+      if (dup) { toast.error(`A customer with email "${newCustomer.email}" already exists.`); return; }
+    }
     const hub = activeHubs.find((h) => h.name === (newCustomer.location || activeHubs[0]?.name));
     createCustomer.mutate({
       customer_name: newCustomer.name!,

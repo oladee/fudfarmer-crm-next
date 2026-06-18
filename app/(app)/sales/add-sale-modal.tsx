@@ -15,6 +15,7 @@ import type { AppUser } from '@/types/api';
 import type { HubScopeFilter } from '@/hooks/use-hub-scope';
 import { fmt, NAIRA, INPUT_CLS, LABEL_CLS, BTN_PRIMARY, BTN_SECONDARY } from './sales-utils';
 import { ModalDialog } from './modal-dialog';
+import { SearchableCustomerSelect } from '@/components/searchable-customer-select';
 
 type SelectedFormCustomer = Customer & {
   avgOrder: number;
@@ -144,9 +145,16 @@ export function AddSaleModal({
           {/* Customer */}
           <div className="space-y-2">
             <label htmlFor="sale-customer" className={LABEL_CLS}>Customer *</label>
-            <select id="sale-customer" value={newSale.customerId || ''} onChange={(e) => { setNewSale({ ...newSale, customerId: e.target.value }); setTouched((t) => ({ ...t, customerId: true })); }} className={`${INPUT_CLS} ${touched.customerId && validationErrors.customerId ? 'border-red-500' : ''}`}>
-              <option value="">-- Select Customer --</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
-            </select>
+            <SearchableCustomerSelect
+              id="sale-customer"
+              customers={customers}
+              value={newSale.customerId || ''}
+              onChange={(customerId) => {
+                setNewSale({ ...newSale, customerId });
+                setTouched((t) => ({ ...t, customerId: true }));
+              }}
+              error={Boolean(touched.customerId && validationErrors.customerId)}
+            />
             {touched.customerId && validationErrors.customerId && <p className="text-xs text-red-500">{validationErrors.customerId}</p>}
           </div>
 
