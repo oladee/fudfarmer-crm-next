@@ -569,3 +569,44 @@ export interface InventoryImportResult {
   failed: number;
   results: { lineNo: number; success: boolean; error?: string }[];
 }
+
+export interface CustomerImportPreviewRow {
+  lineNo: number;
+  customer_name: string;
+  hub_name?: string;
+  valid: boolean;
+  skipped?: boolean;
+  errors: string[];
+  warnings: string[];
+  resolved?: {
+    lineNo: number;
+    customer_name: string;
+    hub_name?: string;
+    customer_type: string;
+    customer_location: string;
+    customer_phone: string;
+  };
+}
+
+export interface CustomerImportValidateResponse {
+  rows: CustomerImportPreviewRow[];
+  summary: { total: number; valid: number; invalid: number; skipped: number };
+}
+
+export interface CustomerImportResult {
+  processed?: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  results: { lineNo: number; success: boolean; skipped?: boolean; error?: string }[];
+}
+
+export type CustomerImportRowStatus = 'imported' | 'skipped' | 'invalid' | 'failed';
+
+export interface CustomerImportSummaryRow {
+  lineNo: number;
+  customer_name: string;
+  hub_name?: string;
+  status: CustomerImportRowStatus;
+  reasons: string[];
+}

@@ -33,6 +33,8 @@ import {
   ApiBulkImportMovementRow,
   InventoryImportValidateResponse,
   InventoryImportResult,
+  CustomerImportValidateResponse,
+  CustomerImportResult,
 } from '@/types/api';
 import {
   mapCreditCustomerSummary,
@@ -441,13 +443,7 @@ export function useValidateCustomerImport() {
     mutationFn: async (file: File) => {
       const form = new FormData();
       form.append('file', file);
-      const res = await axiosPostForm('customers/import/validate', form, true) as ApiListResponse<{
-        rows: { valid: boolean; skipped?: boolean; resolved?: unknown; errors?: string[]; warnings?: string[] }[];
-        summary: Record<string, number>;
-      }> | {
-        rows: { valid: boolean; skipped?: boolean; resolved?: unknown; errors?: string[]; warnings?: string[] }[];
-        summary: Record<string, number>;
-      };
+      const res = await axiosPostForm('customers/import/validate', form, true) as ApiListResponse<CustomerImportValidateResponse> | CustomerImportValidateResponse;
       return unwrapImportResponse(res);
     },
   });
@@ -456,7 +452,8 @@ export function useValidateCustomerImport() {
 export function useImportCustomers() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (rows: unknown[]) => unwrapImportResponse(await axiosPost('customers/import', { rows }, true)),
+    mutationFn: async (rows: unknown[]) =>
+      unwrapImportResponse(await axiosPost('customers/import', { rows }, true)) as CustomerImportResult,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customers'] });
       qc.invalidateQueries({ queryKey: ['auditLogs'] });

@@ -11,6 +11,12 @@ import {
   Customer, CustomerType, PREDEFINED_SEGMENTS,
   CreditGrade,
 } from '@/types';
+import type {
+  CustomerImportPreviewRow,
+  CustomerImportResult,
+  CustomerImportSummaryRow,
+  CustomerImportRowStatus,
+} from '@/types/api';
 import { toast } from 'sonner';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
@@ -28,6 +34,55 @@ import {
 } from 'lucide-react';
 
 type DetailTab = 'overview' | 'purchases' | 'credit' | 'interactions';
+
+function buildCustomerImportSummaryRows(
+  validationRows: CustomerImportPreviewRow[],
+  importResults?: CustomerImportResult['results'],
+): CustomerImportSummaryRow[] {
+  const resultsByLine = new Map((importResults ?? []).map((result) => [result.lineNo, result]));
+
+  return validationRows.map((row) => {
+    const result = resultsByLine.get(row.lineNo);
+    let status: CustomerImportRowStatus;
+    const reasons: string[] = [];
+
+    if (!row.valid) {
+      status = 'invalid';
+      reasons.push(...row.errors);
+    } else if (row.skipped) {
+      status = 'skipped';
+      reasons.push(...row.warnings);
+    } else if (result) {
+      if (!result.success) {
+        status = 'failed';
+        if (result.error) reasons.push(result.error);
+      } else if (result.skipped) {
+        status = 'skipped';
+        reasons.push('Customer name already exists; row will be skipped.');
+      } else {
+        status = 'imported';
+      }
+    } else {
+      status = 'failed';
+      reasons.push('Row was not imported.');
+    }
+
+    return {
+      lineNo: row.lineNo,
+      customer_name: row.customer_name,
+      hub_name: row.hub_name,
+      status,
+      reasons,
+    };
+  });
+}
+
+const customerImportStatusStyles: Record<CustomerImportRowStatus, string> = {
+  imported: 'bg-green-100 text-green-700',
+  skipped: 'bg-orange-100 text-orange-700',
+  invalid: 'bg-red-100 text-red-700',
+  failed: 'bg-red-100 text-red-700',
+};
 
 export default function CustomersPage() {
   const { user } = useAuth();
@@ -71,6 +126,7 @@ export default function CustomersPage() {
     skipped: number;
     invalid: number;
     failed: number;
+    rows: CustomerImportSummaryRow[];
   } | null>(null);
   const [customSegments, setCustomSegments] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -106,7 +162,7 @@ export default function CustomersPage() {
 
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
     name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C,
-    location: hubScope.defaultHubName || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0,
+    location: hubScope.hubName || hubScope.defaultHubName || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0,
   });
 
   // --- Helpers ---
@@ -193,7 +249,7 @@ export default function CustomersPage() {
     }, {
       onSuccess: () => {
         setShowAddModal(false);
-        setNewCustomer({ name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C, location: activeHubs[0]?.name || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0 });
+        setNewCustomer({ name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C, location: hubScope.hubName || hubScope.defaultHubName || activeHubs[0]?.name || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0 });
         toast.success('Customer added.');
       },
       onError: (err) => toast.error(err.message),
@@ -311,35 +367,41 @@ export default function CustomersPage() {
       const validation = await validateCustomerImport.mutateAsync(file);
       const skipped = validation.summary.skipped ?? 0;
       const invalid = validation.summary.invalid ?? 0;
+      const total = validation.summary.total ?? validation.rows.length;
       const rows = validation.rows
         .filter((row) => row.valid && !row.skipped && row.resolved)
         .map((row) => row.resolved);
       if (rows.length === 0) {
         setCustomerImportSummary({
           fileName: file.name,
-          total: validation.summary.total ?? validation.rows.length,
+          total,
           imported: 0,
           skipped,
           invalid,
           failed: 0,
+          rows: buildCustomerImportSummaryRows(validation.rows),
         });
         toast.warning(`No new customers to import. ${skipped} row(s) skipped, ${invalid} invalid.`);
         return;
       }
       setCustomerImportProgress({ stage: 'importing', fileName: file.name });
-      const result = await importCustomers.mutateAsync(rows) as { imported?: number; skipped?: number; failed?: number };
+      const result = await importCustomers.mutateAsync(rows);
+      const importFailed = result.failed ?? 0;
+      const importSkipped = result.skipped ?? 0;
+      const imported = result.imported ?? 0;
       setCustomerImportSummary({
         fileName: file.name,
-        total: validation.summary.total ?? validation.rows.length,
-        imported: result.imported ?? rows.length,
-        skipped: skipped + (result.skipped ?? 0),
+        total,
+        imported,
+        skipped: skipped + importSkipped,
         invalid,
-        failed: result.failed ?? 0,
+        failed: importFailed,
+        rows: buildCustomerImportSummaryRows(validation.rows, result.results),
       });
-      if (skipped > 0 || invalid > 0) {
-        toast.warning(`${skipped} duplicate row(s) skipped, ${invalid} invalid row(s) ignored.`);
+      if (skipped > 0 || invalid > 0 || importFailed > 0) {
+        toast.warning(`${skipped + importSkipped} duplicate row(s) skipped, ${invalid} invalid, ${importFailed} failed.`);
       }
-      toast.success(`Imported ${result.imported ?? rows.length} customer(s). ${result.skipped ?? 0} skipped, ${result.failed ?? 0} failed.`);
+      toast.success(`Imported ${imported} customer(s).`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Customer import failed.');
     } finally {
@@ -527,11 +589,9 @@ export default function CustomersPage() {
               <div className="space-y-2"><label className="text-sm font-medium">Company (Optional)</label><input type="text" value={newCustomer.companyName} onChange={(e) => setNewCustomer({ ...newCustomer, companyName: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
               <div className="space-y-2"><label className="text-sm font-medium">Type</label><select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value as CustomerType })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value={CustomerType.B2C}>B2C</option><option value={CustomerType.B2B}>B2B</option></select></div>
               <div className="space-y-2"><label className="text-sm font-medium">Location</label>
-                {hubScope.canSwitchHubs ? (
-                  <select value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">{hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}</select>
-                ) : (
-                  <input type="text" readOnly disabled value={hubScope.hubName} className="flex h-10 w-full rounded-md border border-input bg-muted px-3 py-2 text-sm opacity-80" />
-                )}
+                <select value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  {activeHubs.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
+                </select>
               </div>
               <div className="space-y-2"><label className="text-sm font-medium">Assigned Agent</label><select value={newCustomer.addedByAgentId || ''} onChange={(e) => setNewCustomer({ ...newCustomer, addedByAgentId: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">-- Select --</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
             </div>
@@ -604,7 +664,7 @@ export default function CustomersPage() {
 
       {customerImportSummary && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg border bg-card p-6 shadow-xl">
+          <div className="w-full max-w-3xl rounded-lg border bg-card p-6 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold">Customer Upload Summary</h2>
@@ -620,7 +680,12 @@ export default function CustomersPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+            {customerImportSummary.imported === 0 && (
+              <div className="mt-4 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+                No rows were importable. Review the reasons below.
+              </div>
+            )}
+            <div className="mt-5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
               <div className="rounded-md border p-3">
                 <span className="text-xs text-muted-foreground">Total rows</span>
                 <p className="text-xl font-bold">{customerImportSummary.total}</p>
@@ -640,6 +705,40 @@ export default function CustomersPage() {
                 </p>
               </div>
             </div>
+            {customerImportSummary.rows.length > 0 && (
+              <div className="mt-5 overflow-hidden rounded-md border">
+                <div className="max-h-72 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                      <tr className="border-b text-left text-xs text-muted-foreground">
+                        <th className="p-3 font-medium">Row</th>
+                        <th className="p-3 font-medium">Customer</th>
+                        <th className="p-3 font-medium">Hub</th>
+                        <th className="p-3 font-medium">Status</th>
+                        <th className="p-3 font-medium">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerImportSummary.rows.map((row) => (
+                        <tr key={row.lineNo} className="border-b last:border-b-0">
+                          <td className="p-3 align-top">{row.lineNo}</td>
+                          <td className="p-3 align-top font-medium">{row.customer_name}</td>
+                          <td className="p-3 align-top">{row.hub_name || '—'}</td>
+                          <td className="p-3 align-top">
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${customerImportStatusStyles[row.status]}`}>
+                              {row.status}
+                            </span>
+                          </td>
+                          <td className="p-3 align-top text-muted-foreground">
+                            {row.reasons.length > 0 ? row.reasons.join('; ') : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setCustomerImportSummary(null)}
@@ -831,13 +930,9 @@ export default function CustomersPage() {
                     </div>
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Location</label>
-                      {hubScope.canSwitchHubs ? (
-                        <select value={editForm.location || hubScope.defaultHubName} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
-                          {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
-                        </select>
-                      ) : (
-                        <input type="text" readOnly disabled value={hubScope.hubName} className="flex h-9 w-full rounded-md border border-input bg-muted px-3 py-1 text-sm opacity-80" />
-                      )}
+                      <select value={editForm.location || hubScope.hubName || activeHubs[0]?.name} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
+                        {activeHubs.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
+                      </select>
                     </div>
                   </div>
                   <div className="space-y-1.5">
