@@ -1,7 +1,19 @@
 const PLACEHOLDER_EMAILS = new Set(['', 'n/a', 'na', '-', 'none', 'nil']);
 
+export type ApiCustomerType = 'b2c' | 'b2b';
+
 export function isPlaceholderEmail(email?: string | null): boolean {
   return PLACEHOLDER_EMAILS.has((email ?? '').trim().toLowerCase());
+}
+
+/** Backend expects lowercase b2c / b2b; UI uses B2C / B2B. */
+export function customerTypeToApi(type?: string | null): ApiCustomerType {
+  return String(type ?? '').toLowerCase() === 'b2b' ? 'b2b' : 'b2c';
+}
+
+/** Map API customer_type to display enum values B2C / B2B. */
+export function customerTypeFromApi(type?: string | null): 'B2C' | 'B2B' {
+  return customerTypeToApi(type) === 'b2b' ? 'B2B' : 'B2C';
 }
 
 export function customerMatchesSearch(customer: { name: string; email?: string; companyName?: string; type?: string; location?: string }, query: string): boolean {

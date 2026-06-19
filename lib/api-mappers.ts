@@ -15,6 +15,7 @@ import {
   ApiDashboardMetricsRaw,
   DashboardMetricsData,
 } from '@/types/api';
+import { customerTypeFromApi } from '@/lib/customer-helpers';
 import {
   Hub,
   Customer,
@@ -146,7 +147,7 @@ export function mapCustomer(c: ApiCustomer, hubMap?: Record<string, string>): Cu
     name: c.customer_name,
     email: c.customer_email || '',
     phone: c.customer_phone || '',
-    type: (c.customer_type === 'B2B' ? CustomerType.B2B : CustomerType.B2C),
+    type: customerTypeFromApi(c.customer_type) as CustomerType,
     location: resolveHubName(c.customer_location, hubMap),
     companyName: c.company_name,
     joinedDate: toDateStr(c.joined_date) || new Date().toISOString().split('T')[0],

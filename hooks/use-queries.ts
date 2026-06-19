@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HAS_API, requireApi } from '@/lib/require-api';
 import { axiosGet, axiosPost, axiosPatch, axiosDelete, axiosGetBlob, axiosPostForm } from '@/lib/api';
+import { customerTypeToApi } from '@/lib/customer-helpers';
 import { mapApiUser } from '@/lib/utils';
 import {
   ApiUser,
@@ -362,7 +363,7 @@ export function useCustomers(filters?: { search?: string; segment?: string; type
       const hubMap = await fetchHubMap();
       const params: Record<string, string | undefined> = {
         search: filters?.search,
-        customer_type: filters?.type,
+        customer_type: filters?.type ? customerTypeToApi(filters.type) : undefined,
         customer_location: filters?.hub_id,
         segment: filters?.segment,
       };
@@ -386,7 +387,10 @@ export function useCreateCustomer() {
       segments?: string[];
       assigned_agent?: string;
     }) => {
-      const res = await axiosPost('customers', dto, true) as ApiCustomer;
+      const res = await axiosPost('customers', {
+        ...dto,
+        customer_type: customerTypeToApi(dto.customer_type),
+      }, true) as ApiCustomer;
       const hubMap = await fetchHubMap();
       return mapCustomer(res, hubMap);
     },
@@ -411,7 +415,10 @@ export function useUpdateCustomer() {
       segments?: string[];
       assigned_agent?: string;
     }) => {
-      const res = await axiosPatch(`customers/${id}`, dto, true) as ApiCustomer;
+      const res = await axiosPatch(`customers/${id}`, {
+        ...dto,
+        ...(dto.customer_type !== undefined ? { customer_type: customerTypeToApi(dto.customer_type) } : {}),
+      }, true) as ApiCustomer;
       const hubMap = await fetchHubMap();
       return mapCustomer(res, hubMap);
     },
