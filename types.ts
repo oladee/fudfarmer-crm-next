@@ -267,6 +267,21 @@ export interface Customer {
   addedByAgentName?: string;
 }
 
+export interface CustomerListSummary {
+  total: number;
+  b2b: number;
+  b2c: number;
+  repeat: number;
+  totalRevenue: number;
+  avgValue: number;
+}
+
+export interface CustomerListResult {
+  items: Customer[];
+  meta: { page: number; limit: number; total: number; totalPages: number };
+  summary: CustomerListSummary;
+}
+
 
 export interface Sale {
   id: string;

@@ -87,6 +87,7 @@ export default function SalesPage() {
     productDetailsText, setProductDetailsText, customerCreditWarning,
     selectedFormCustomer, availableInventory, selectedInventoryItem,
     handleProductChange, handleQuantityChange, handleSaveSale,
+    savingSale, savingEdit, voidingSale, updatingDelivery,
     showImportModal, setShowImportModal, importPreview, setImportPreview, importSummary, setImportSummary,
     importing, validating, handleDownloadTemplate, handleImportFile, handleImportConfirm, importInputRef,
     downloadingTemplate, handleExport,
@@ -315,6 +316,9 @@ export default function SalesPage() {
           onSaveEdit={saveEdit}
           onVoidSale={handleVoidSale}
           onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
+          savingEdit={savingEdit}
+          voidingSale={voidingSale}
+          updatingDelivery={updatingDelivery}
           can={can}
         />
       )}
@@ -351,6 +355,7 @@ export default function SalesPage() {
         agents={agents}
         user={user}
         handleSaveSale={handleSaveSale}
+        savingSale={savingSale}
         isFormValid={isFormValid}
         isHistoricalSale={isHistoricalSale}
         productDetailsText={productDetailsText}

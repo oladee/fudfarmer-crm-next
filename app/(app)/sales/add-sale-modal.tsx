@@ -16,6 +16,7 @@ import type { HubScopeFilter } from '@/hooks/use-hub-scope';
 import { fmt, NAIRA, INPUT_CLS, LABEL_CLS, BTN_PRIMARY, BTN_SECONDARY } from './sales-utils';
 import { ModalDialog } from './modal-dialog';
 import { SearchableCustomerSelect } from '@/components/searchable-customer-select';
+import { SubmitButton } from '@/components/submit-button';
 
 type SelectedFormCustomer = Customer & {
   avgOrder: number;
@@ -55,6 +56,7 @@ export interface AddSaleModalProps {
   agents: Agent[];
   user: AppUser | null;
   handleSaveSale: () => void;
+  savingSale?: boolean;
   isFormValid: boolean;
   isHistoricalSale: boolean;
   productDetailsText: string;
@@ -93,6 +95,7 @@ export function AddSaleModal({
   agents,
   user,
   handleSaveSale,
+  savingSale = false,
   isFormValid,
   isHistoricalSale,
   productDetailsText,
@@ -341,7 +344,7 @@ export function AddSaleModal({
         </div>
         <div className="mt-6 flex justify-end gap-3">
           <button type="button" onClick={onClose} className={BTN_SECONDARY}>Cancel</button>
-          <button type="button" onClick={handleSaveSale} disabled={!isFormValid} className={`${BTN_PRIMARY} disabled:opacity-50 disabled:cursor-not-allowed`}>Record Sale</button>
+          <SubmitButton type="button" onClick={handleSaveSale} disabled={!isFormValid} loading={savingSale} className={BTN_PRIMARY}>Record Sale</SubmitButton>
         </div>
       </div>
     </ModalDialog>

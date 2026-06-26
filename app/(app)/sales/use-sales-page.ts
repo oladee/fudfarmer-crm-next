@@ -68,7 +68,8 @@ export function useSalesPage() {
   );
 
   const { data: sales = [] } = useSales(salesApiFilters);
-  const { data: customers = [] } = useCustomers();
+  const { data: customerList } = useCustomers();
+  const customers = customerList?.items ?? [];
   const { data: agents = [] } = useAgents();
   const { data: inventory = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
   const { data: stockLogs = [] } = useStockLogs();
@@ -663,5 +664,9 @@ export function useSalesPage() {
     btnSecondary: BTN_SECONDARY,
     inputCls: INPUT_CLS,
     labelCls: LABEL_CLS,
+    savingSale: createSale.isPending,
+    savingEdit: updateSale.isPending,
+    voidingSale: voidSale.isPending,
+    updatingDelivery: updateDeliveryStatusMutation.isPending,
   };
 }

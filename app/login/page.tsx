@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { Leaf, Loader2 } from 'lucide-react';
+import { SubmitButton } from '@/components/submit-button';
 
 export default function LoginPage() {
   const { login, isAuthenticated, loading } = useAuth();
@@ -83,14 +84,13 @@ export default function LoginPage() {
               </p>
             )}
 
-            <button
+            <SubmitButton
               type="submit"
-              disabled={submitting}
-              className="inline-flex w-full items-center justify-center rounded-lg bg-primary text-primary-foreground h-10 px-4 text-sm font-medium shadow-md shadow-primary/20 hover:bg-primary/90 active:scale-[0.98] transition-all disabled:opacity-50"
+              loading={submitting}
+              className="w-full h-10 rounded-lg shadow-md shadow-primary/20 active:scale-[0.98]"
             >
-              {submitting ? <Loader2 className="animate-spin mr-2" size={16} /> : null}
               Sign In
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </div>

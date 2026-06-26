@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HAS_API, requireApi } from '@/lib/require-api';
 import { axiosGet, axiosPost, axiosPatch, axiosDelete, axiosGetBlob, axiosPostForm } from '@/lib/api';
-import { customerTypeToApi } from '@/lib/customer-helpers';
+import { customerTypeToApi, customerCompanyNameForApi, customerPhoneForApi } from '@/lib/customer-helpers';
 import { mapApiUser } from '@/lib/utils';
 import {
   ApiUser,
@@ -13,6 +13,8 @@ import {
   ApiListResponse,
   ApiHub,
   ApiCustomer,
+  ApiCustomerListResponse,
+  ApiCustomerListSummary,
   ApiSale,
   ApiProduct,
   ApiStockLog,
@@ -71,6 +73,8 @@ import {
   Hub,
   FeedbackType,
   FeedbackPriority,
+  CustomerListResult,
+  CustomerListSummary,
 } from '../types';
 
 
@@ -81,6 +85,45 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   });
   const s = qs.toString();
   return s ? `?${s}` : '';
+}
+
+type UseQueryEnabledOptions = { enabled?: boolean };
+
+const HUBS_STALE_MS = 5 * 60 * 1000;
+const CUSTOMERS_PAGE_SIZE = 20;
+
+const EMPTY_CUSTOMER_LIST: CustomerListResult = {
+  items: [],
+  meta: { page: 1, limit: CUSTOMERS_PAGE_SIZE, total: 0, totalPages: 1 },
+  summary: { total: 0, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 },
+};
+
+function defaultCustomerListSummary(total: number): CustomerListSummary {
+  return { total, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 };
+}
+
+function parseCustomerListResponse(raw: unknown): {
+  data: ApiCustomer[];
+  meta: CustomerListResult['meta'];
+  summary: CustomerListSummary;
+} {
+  const payload = (raw as ApiListResponse<ApiCustomerListResponse>)?.data ?? raw;
+  if (Array.isArray(payload)) {
+    return {
+      data: payload,
+      meta: { page: 1, limit: payload.length, total: payload.length, totalPages: 1 },
+      summary: defaultCustomerListSummary(payload.length),
+    };
+  }
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    const list = payload as ApiCustomerListResponse;
+    return {
+      data: list.data ?? [],
+      meta: list.meta ?? { page: 1, limit: list.data?.length ?? 0, total: list.data?.length ?? 0, totalPages: 1 },
+      summary: list.summary ?? defaultCustomerListSummary(list.meta?.total ?? list.data?.length ?? 0),
+    };
+  }
+  return { data: [], meta: EMPTY_CUSTOMER_LIST.meta, summary: EMPTY_CUSTOMER_LIST.summary };
 }
 
 async function fetchHubsList(): Promise<Hub[]> {
@@ -134,6 +177,7 @@ export function useHubs() {
   return useQuery({
     queryKey: ['hubs'],
     queryFn: fetchHubsList,
+    staleTime: HUBS_STALE_MS,
   });
 }
 
@@ -252,15 +296,19 @@ export function useDeleteRole() {
 }
 
 // --- Agents (Users) ---
-export function useAgents(query?: {
-  search?: string;
-  role_id?: string;
-  hub_id?: string;
-  status?: string;
-  limit?: number;
-}) {
+export function useAgents(
+  query?: {
+    search?: string;
+    role_id?: string;
+    hub_id?: string;
+    status?: string;
+    limit?: number;
+  },
+  options?: UseQueryEnabledOptions,
+) {
   return useQuery({
     queryKey: ['agents', query],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       if (!HAS_API) return [];
       const q = { limit: 200, ...query };
@@ -355,21 +403,40 @@ export function useUpdateProfile() {
 }
 
 // --- Customers ---
-export function useCustomers(filters?: { search?: string; segment?: string; type?: string; hub_id?: string }) {
+export function useCustomers(filters?: {
+  search?: string;
+  segment_id?: string;
+  type?: string;
+  hub_id?: string;
+  page?: number;
+  limit?: number;
+}) {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ['customers', filters],
-    queryFn: async () => {
-      if (!HAS_API) return [];
-      const hubMap = await fetchHubMap();
-      const params: Record<string, string | undefined> = {
+    queryFn: async (): Promise<CustomerListResult> => {
+      if (!HAS_API) return EMPTY_CUSTOMER_LIST;
+      const hubs = await qc.fetchQuery({
+        queryKey: ['hubs'],
+        queryFn: fetchHubsList,
+        staleTime: HUBS_STALE_MS,
+      });
+      const hubMap = buildHubMap(hubs);
+      const params: Record<string, string | number | undefined> = {
         search: filters?.search,
         customer_type: filters?.type ? customerTypeToApi(filters.type) : undefined,
-        customer_location: filters?.hub_id,
-        segment: filters?.segment,
+        hub_id: filters?.hub_id,
+        segment_id: filters?.segment_id,
+        page: filters?.page,
+        limit: filters?.limit,
       };
       const raw = await axiosGet(`customers${buildQuery(params)}`, true);
-      const list: ApiCustomer[] = Array.isArray(raw) ? raw : (raw as ApiListResponse<ApiCustomer[]>).data ?? [];
-      return list.map((c) => mapCustomer(c, hubMap));
+      const parsed = parseCustomerListResponse(raw);
+      return {
+        items: parsed.data.map((c) => mapCustomer(c, hubMap)),
+        meta: parsed.meta,
+        summary: parsed.summary,
+      };
     },
   });
 }
@@ -387,9 +454,12 @@ export function useCreateCustomer() {
       segments?: string[];
       assigned_agent?: string;
     }) => {
+      const { company_name, customer_type, ...rest } = dto;
       const res = await axiosPost('customers', {
-        ...dto,
-        customer_type: customerTypeToApi(dto.customer_type),
+        ...rest,
+        customer_type: customerTypeToApi(customer_type),
+        customer_phone: customerPhoneForApi(dto.customer_phone),
+        ...customerCompanyNameForApi(customer_type, company_name),
       }, true) as ApiCustomer;
       const hubMap = await fetchHubMap();
       return mapCustomer(res, hubMap);
@@ -415,9 +485,16 @@ export function useUpdateCustomer() {
       segments?: string[];
       assigned_agent?: string;
     }) => {
+      const { company_name, customer_type, customer_phone, ...rest } = dto;
       const res = await axiosPatch(`customers/${id}`, {
-        ...dto,
-        ...(dto.customer_type !== undefined ? { customer_type: customerTypeToApi(dto.customer_type) } : {}),
+        ...rest,
+        ...(customer_phone !== undefined ? { customer_phone: customerPhoneForApi(customer_phone) } : {}),
+        ...(customer_type !== undefined
+          ? {
+              customer_type: customerTypeToApi(customer_type),
+              ...customerCompanyNameForApi(customer_type, company_name),
+            }
+          : {}),
       }, true) as ApiCustomer;
       const hubMap = await fetchHubMap();
       return mapCustomer(res, hubMap);
@@ -498,9 +575,13 @@ export function useDeleteSegment() {
 }
 
 // --- Sales ---
-export function useSales(filters?: { status?: string; date_from?: string; date_to?: string; date_field?: string; payment_mode?: string; hub_id?: string }) {
+export function useSales(
+  filters?: { status?: string; date_from?: string; date_to?: string; date_field?: string; payment_mode?: string; hub_id?: string },
+  options?: UseQueryEnabledOptions,
+) {
   return useQuery({
     queryKey: ['sales', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       if (!HAS_API) return [];
       const res = await axiosGet(`sales${buildQuery(filters ?? {})}`, true) as ApiListResponse<{ items: ApiSale[] }>;
@@ -926,9 +1007,10 @@ export function useFlagCredit() {
 }
 
 // --- Feedback ---
-export function useFeedback(filters?: { status?: string }) {
+export function useFeedback(filters?: { status?: string }, options?: UseQueryEnabledOptions) {
   return useQuery({
     queryKey: ['feedback', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       if (!HAS_API) return [];
       const raw = await axiosGet(`feedbacks${buildQuery(filters ?? {})}`, true);
@@ -1008,11 +1090,13 @@ export function useResolveFeedback() {
 }
 
 // --- Enquiries ---
-const INTERACTION_LIST_LIMIT = 200;
+/** Backend list endpoints cap limit at 100 (see ListCompensationQueryDto). */
+const INTERACTION_LIST_LIMIT = 100;
 
-export function useEnquiries(filters?: { status?: string }) {
+export function useEnquiries(filters?: { status?: string }, options?: UseQueryEnabledOptions) {
   return useQuery({
     queryKey: ['enquiries', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       if (!HAS_API) return [];
       const q = { page: 1, limit: INTERACTION_LIST_LIMIT, ...filters };
@@ -1064,9 +1148,10 @@ export function useResolveEnquiry() {
 }
 
 // --- Compensations ---
-export function useCompensations(filters?: { status?: string }) {
+export function useCompensations(filters?: { status?: string }, options?: UseQueryEnabledOptions) {
   return useQuery({
     queryKey: ['compensations', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       if (!HAS_API) return [];
       const q = { page: 1, limit: INTERACTION_LIST_LIMIT, ...filters };
@@ -1219,8 +1304,8 @@ export function useDashboardMetrics(): ReturnType<typeof useQuery<DashboardMetri
       const inventory = (inventoryRes.data ?? []).map((p) => mapInventoryItem(p, hubMap));
       const feedbackList: ApiFeedback[] = Array.isArray(feedbackRaw) ? feedbackRaw : (feedbackRaw as ApiListResponse<ApiFeedback[]>).data ?? [];
       const enquiryList: ApiEnquiry[] = Array.isArray(enquiryRaw) ? enquiryRaw : (enquiryRaw as ApiListResponse<ApiEnquiry[]>).data ?? [];
-      const customerList: ApiCustomer[] = Array.isArray(customerRaw) ? customerRaw : (customerRaw as ApiListResponse<ApiCustomer[]>).data ?? [];
-      const customers = customerList.map((c) => mapCustomer(c, hubMap));
+      const customerList = parseCustomerListResponse(customerRaw);
+      const customers = customerList.data.map((c) => mapCustomer(c, hubMap));
       const sales = (salesRes.data?.items ?? []).map(mapSale);
 
       return normalizeDashboardMetrics(metricsRaw, {

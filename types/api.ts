@@ -143,6 +143,26 @@ export interface ApiCustomer {
   added_by?: string;
 }
 
+export interface ApiCustomerListSummary {
+  total: number;
+  b2b: number;
+  b2c: number;
+  repeat: number;
+  totalRevenue: number;
+  avgValue: number;
+}
+
+export interface ApiCustomerListResponse {
+  data: ApiCustomer[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  summary: ApiCustomerListSummary;
+}
+
 export interface ApiSaleItem {
   product?: string;
   product_id?: string;

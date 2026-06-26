@@ -2,7 +2,7 @@
 
 import {
   Package, CreditCard, MapPin, Truck, Edit3, Trash2,
-  Calendar, Clock, Users, ShoppingCart, ArrowRightLeft, Check, ArrowUpRight,
+  Calendar, Clock, Users, ShoppingCart, ArrowRightLeft, Check, ArrowUpRight, Loader2,
 } from 'lucide-react';
 import { Sale, PaymentTerms, SalesChannel, DeliveryStatus, PaymentMode } from '@/types';
 import type { StockLog } from '@/types';
@@ -12,6 +12,7 @@ import {
   INPUT_CLS, BTN_PRIMARY, BTN_SECONDARY,
 } from './sales-utils';
 import type { DetailTab } from './sales-utils';
+import { SubmitButton } from '@/components/submit-button';
 
 export type SaleDetailTabProps = Readonly<{
   sale: Sale;
@@ -25,6 +26,8 @@ export type SaleDetailTabProps = Readonly<{
   onSelectSale: (sale: Sale) => void;
   onVoidSale: () => void;
   onUpdateDeliveryStatus: (id: string, status: DeliveryStatus) => void;
+  voidingSale?: boolean;
+  updatingDelivery?: boolean;
   can: (permission: Permission) => boolean;
 }>;
 
@@ -32,10 +35,12 @@ function DeliveryAdvanceButton({
   sale,
   canUpdate,
   onAdvance,
+  updatingDelivery = false,
 }: Readonly<{
   sale: Sale;
   canUpdate: boolean;
   onAdvance: (status: DeliveryStatus) => void;
+  updatingDelivery?: boolean;
 }>) {
   if (sale.status === 'Voided' || !canUpdate) return null;
   const currentIdx = DELIVERY_STEPS.indexOf(sale.deliveryStatus as DeliveryStatus);
@@ -48,19 +53,21 @@ function DeliveryAdvanceButton({
     );
   }
   return (
-    <button
+    <SubmitButton
       type="button"
       onClick={() => onAdvance(nextStep)}
+      loading={updatingDelivery}
+      disabled={!canUpdate}
       className={`${BTN_PRIMARY} w-full justify-center h-10`}
     >
       <ArrowUpRight size={14} className="mr-1.5" /> Advance to: {nextStep}
-    </button>
+    </SubmitButton>
   );
 }
 
 function OverviewTab({
   sale, isEditing, editForm, setEditForm, showVoidConfirm, setShowVoidConfirm,
-  saleStockLogs, onVoidSale, can,
+  saleStockLogs, onVoidSale, voidingSale = false, can,
 }: SaleDetailTabProps) {
   return (
     <>
@@ -211,7 +218,7 @@ function OverviewTab({
             <div className="p-4 rounded-md border border-red-200 bg-red-50">
               <p className="text-sm text-red-800 font-medium mb-3">Are you sure? This will reverse customer stats and mark the sale as voided.</p>
               <div className="flex gap-2">
-                <button type="button" onClick={onVoidSale} className="inline-flex items-center rounded-md text-sm font-medium bg-red-600 text-white hover:bg-red-700 h-8 px-3">Yes, Void Sale</button>
+                <SubmitButton type="button" onClick={onVoidSale} loading={voidingSale} variant="destructive" className="h-8 px-3">Yes, Void Sale</SubmitButton>
                 <button type="button" onClick={() => setShowVoidConfirm(false)} className={BTN_SECONDARY}>Cancel</button>
               </div>
             </div>
@@ -225,7 +232,7 @@ function OverviewTab({
 }
 
 function DeliveryTab({
-  sale, isEditing, editForm, setEditForm, onUpdateDeliveryStatus, can,
+  sale, isEditing, editForm, setEditForm, onUpdateDeliveryStatus, updatingDelivery = false, can,
 }: SaleDetailTabProps) {
   const isDeliverySale =
     sale.channel === SalesChannel.DELIVERY || sale.deliveryStatus !== DeliveryStatus.NOT_APPLICABLE;
@@ -254,11 +261,11 @@ function DeliveryTab({
               <div key={step} className="flex-1 flex flex-col items-center">
                 <button
                   type="button"
-                  onClick={() => canUpdate && onUpdateDeliveryStatus(sale.id, step)}
-                  disabled={!canUpdate}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${isCompleted ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'} ${isCurrent ? 'ring-2 ring-primary/30' : ''} ${canUpdate ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
+                  onClick={() => canUpdate && !updatingDelivery && onUpdateDeliveryStatus(sale.id, step)}
+                  disabled={!canUpdate || updatingDelivery}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${isCompleted ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'} ${isCurrent ? 'ring-2 ring-primary/30' : ''} ${canUpdate && !updatingDelivery ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed opacity-60'}`}
                 >
-                  {isCompleted ? <Check size={14} /> : idx + 1}
+                  {updatingDelivery && isCurrent ? <Loader2 size={14} className="animate-spin" /> : isCompleted ? <Check size={14} /> : idx + 1}
                 </button>
                 <span className={`text-[10px] mt-1.5 text-center font-medium ${isCurrent ? 'text-primary' : 'text-muted-foreground'}`}>{step}</span>
               </div>
@@ -294,6 +301,7 @@ function DeliveryTab({
         sale={sale}
         canUpdate={can('sales.update_delivery')}
         onAdvance={(status) => onUpdateDeliveryStatus(sale.id, status)}
+        updatingDelivery={updatingDelivery}
       />
     </>
   );

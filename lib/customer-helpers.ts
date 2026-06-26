@@ -16,6 +16,31 @@ export function customerTypeFromApi(type?: string | null): 'B2C' | 'B2B' {
   return customerTypeToApi(type) === 'b2b' ? 'B2B' : 'B2C';
 }
 
+export function isB2bCustomerType(type?: string | null): boolean {
+  return customerTypeToApi(type) === 'b2b';
+}
+
+/** B2C must omit company_name; B2B requires it when provided to API. */
+const PLACEHOLDER_PHONES = new Set(['', 'n/a', 'na', '-', 'none', 'nil', '0000000000']);
+
+export function isPlaceholderPhone(phone?: string | null): boolean {
+  return PLACEHOLDER_PHONES.has((phone ?? '').trim().toLowerCase());
+}
+
+export function customerPhoneForApi(phone?: string | null): string {
+  const trimmed = (phone ?? '').trim();
+  return isPlaceholderPhone(trimmed) ? 'N/A' : trimmed;
+}
+
+export function customerCompanyNameForApi(
+  customerType: string | undefined,
+  companyName?: string | null,
+): { company_name?: string } {
+  if (!isB2bCustomerType(customerType)) return {};
+  const trimmed = (companyName ?? '').trim();
+  return trimmed ? { company_name: trimmed } : {};
+}
+
 export function customerMatchesSearch(customer: { name: string; email?: string; companyName?: string; type?: string; location?: string }, query: string): boolean {
   const term = query.trim().toLowerCase();
   if (!term) return true;

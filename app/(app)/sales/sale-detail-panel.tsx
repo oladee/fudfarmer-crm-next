@@ -8,6 +8,7 @@ import type { Permission } from '@/lib/permissions';
 import { ModalDialog } from './modal-dialog';
 import { SaleDetailTabContent } from './sale-detail-tabs';
 import type { StockLog } from '@/types';
+import { SubmitButton } from '@/components/submit-button';
 
 export type SaleDetailPanelProps = Readonly<{
   sale: Sale;
@@ -27,6 +28,9 @@ export type SaleDetailPanelProps = Readonly<{
   onSaveEdit: () => void;
   onVoidSale: () => void;
   onUpdateDeliveryStatus: (id: string, status: DeliveryStatus) => void;
+  savingEdit?: boolean;
+  voidingSale?: boolean;
+  updatingDelivery?: boolean;
   can: (permission: Permission) => boolean;
 }>;
 
@@ -37,6 +41,7 @@ function DetailPanelHeader({
   onClose,
   onStartEditing,
   onSaveEdit,
+  savingEdit = false,
   can,
 }: Readonly<{
   sale: Sale;
@@ -45,6 +50,7 @@ function DetailPanelHeader({
   onClose: () => void;
   onStartEditing: () => void;
   onSaveEdit: () => void;
+  savingEdit?: boolean;
   can: (permission: Permission) => boolean;
 }>) {
   return (
@@ -63,7 +69,7 @@ function DetailPanelHeader({
         )}
         {isEditing && (
           <>
-            <button type="button" onClick={onSaveEdit} className="h-8 px-3 rounded-md flex items-center gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium"><Save size={14} /> Save</button>
+            <SubmitButton type="button" onClick={onSaveEdit} loading={savingEdit} className="h-8 px-3 gap-1.5 text-sm"><Save size={14} /> Save</SubmitButton>
             <button type="button" onClick={() => setIsEditing(false)} className="h-8 px-3 rounded-md flex items-center gap-1.5 border hover:bg-accent text-sm font-medium">Cancel</button>
           </>
         )}
@@ -91,6 +97,9 @@ export function SaleDetailPanel({
   onSaveEdit,
   onVoidSale,
   onUpdateDeliveryStatus,
+  savingEdit = false,
+  voidingSale = false,
+  updatingDelivery = false,
   can,
 }: SaleDetailPanelProps) {
   return (
@@ -103,6 +112,7 @@ export function SaleDetailPanel({
           onClose={onClose}
           onStartEditing={onStartEditing}
           onSaveEdit={onSaveEdit}
+          savingEdit={savingEdit}
           can={can}
         />
 
@@ -135,6 +145,8 @@ export function SaleDetailPanel({
             onSelectSale={onSelectSale}
             onVoidSale={onVoidSale}
             onUpdateDeliveryStatus={onUpdateDeliveryStatus}
+            voidingSale={voidingSale}
+            updatingDelivery={updatingDelivery}
             can={can}
           />
         </div>

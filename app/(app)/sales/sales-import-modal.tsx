@@ -176,8 +176,9 @@ export function SalesImportModal({
             type="button"
             onClick={onConfirm}
             disabled={validRows.length === 0 || importing || validating}
-            className={`${BTN_PRIMARY} disabled:opacity-50`}
+            className={`${BTN_PRIMARY} disabled:opacity-50 inline-flex items-center`}
           >
+            {importing && <Loader2 size={16} className="mr-2 animate-spin" />}
             {importButtonLabel}
           </button>
         </div>

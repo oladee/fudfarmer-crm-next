@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/sheet';
 import { fmt, daysUntil, formatDate, statusBadgeClass } from './credit-utils';
 import { toast } from 'sonner';
+import { SubmitButton } from '@/components/submit-button';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -26,6 +27,7 @@ import {
   ChevronUp,
   Flag,
   History,
+  Loader2,
   Receipt,
   ShoppingBag,
   Wallet,
@@ -175,6 +177,7 @@ export function CustomerCreditSheet({ customer, open, onOpenChange }: CustomerCr
                           setExtendReason('');
                         }}
                         onFlag={() => handleFlag(credit)}
+                        flagging={flagCredit.isPending}
                       />
                     ))}
                   </section>
@@ -264,13 +267,13 @@ export function CustomerCreditSheet({ customer, open, onOpenChange }: CustomerCr
               </div>
             </div>
             <div className="border-t px-5 py-3 flex gap-2">
-              <button
+              <SubmitButton
                 onClick={handleRecordPayment}
-                disabled={recordPayment.isPending}
-                className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 disabled:opacity-50"
+                loading={recordPayment.isPending}
+                className="gap-2"
               >
-                <Wallet size={14} className="mr-2" /> Record Payment
-              </button>
+                <Wallet size={14} /> Record Payment
+              </SubmitButton>
               <button
                 onClick={() => setPaymentCredit(null)}
                 className="inline-flex items-center rounded-md text-sm font-medium border h-9 px-4 ml-auto hover:bg-accent"
@@ -330,13 +333,14 @@ export function CustomerCreditSheet({ customer, open, onOpenChange }: CustomerCr
               </div>
             </div>
             <div className="border-t px-5 py-3 flex gap-2">
-              <button
+              <SubmitButton
                 onClick={handleExtendDueDate}
-                disabled={extendDueDate.isPending || !newDueDate}
-                className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 disabled:opacity-50"
+                disabled={!newDueDate}
+                loading={extendDueDate.isPending}
+                className="gap-2"
               >
-                <CalendarClock size={14} className="mr-2" /> Save Extension
-              </button>
+                <CalendarClock size={14} /> Save Extension
+              </SubmitButton>
               <button
                 onClick={() => setExtendCredit(null)}
                 className="inline-flex items-center rounded-md text-sm font-medium border h-9 px-4 ml-auto hover:bg-accent"
@@ -360,6 +364,7 @@ function CreditItemCard({
   onRecordPayment,
   onExtend,
   onFlag,
+  flagging = false,
 }: {
   credit: SaleCreditRecord;
   expanded: boolean;
@@ -369,6 +374,7 @@ function CreditItemCard({
   onRecordPayment: () => void;
   onExtend: () => void;
   onFlag: () => void;
+  flagging?: boolean;
 }) {
   const dueDays = daysUntil(credit.dueDate);
   const paidSoFar = credit.originalAmount - credit.amountOwed;
@@ -514,11 +520,13 @@ function CreditItemCard({
                 <button
                   type="button"
                   onClick={onFlag}
-                  className={`inline-flex items-center gap-1.5 rounded-md text-xs font-medium border h-8 px-3 ml-auto hover:bg-accent ${
+                  disabled={flagging}
+                  className={`inline-flex items-center gap-1.5 rounded-md text-xs font-medium border h-8 px-3 ml-auto hover:bg-accent disabled:opacity-50 disabled:pointer-events-none ${
                     credit.flagged ? 'border-orange-300 text-orange-700' : ''
                   }`}
                 >
-                  <Flag size={12} /> {credit.flagged ? 'Remove flag' : 'Flag'}
+                  {flagging ? <Loader2 size={12} className="animate-spin" /> : <Flag size={12} />}
+                  {credit.flagged ? 'Remove flag' : 'Flag'}
                 </button>
               )}
             </div>

@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
+import { SubmitButton } from '@/components/submit-button';
 import { usePermissions } from '@/hooks/use-permissions';
 import {
   useInventory, useCreateProduct, useUpdateProduct, useStockLogs,
@@ -1416,7 +1417,7 @@ export default function InventoryPage() {
             )}
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowAddProductModal(false)} className={btnSecondary}>Cancel</button>
-              <button onClick={handleSaveProduct} className={btnPrimary}>Create Product</button>
+              <SubmitButton onClick={handleSaveProduct} loading={createProduct.isPending} className={btnPrimary}>Create Product</SubmitButton>
             </div>
           </div>
         </div>
@@ -1490,7 +1491,7 @@ export default function InventoryPage() {
             )}
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => { setShowEditModal(false); setEditProduct({}); }} className={btnSecondary}>Cancel</button>
-              {can('inventory.edit') && <button onClick={handleEditProduct} className={btnPrimary}>Save Changes</button>}
+              {can('inventory.edit') && <SubmitButton onClick={handleEditProduct} loading={updateProduct.isPending} className={btnPrimary}>Save Changes</SubmitButton>}
             </div>
           </div>
         </div>
@@ -1647,7 +1648,7 @@ export default function InventoryPage() {
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => { setShowStockMoveModal(false); setSelectedProduct(null); }} className={btnSecondary}>Cancel</button>
               {((moveData.type === StockMovementType.TRANSFER && can('inventory.transfer')) || (moveData.type !== StockMovementType.TRANSFER && can('inventory.adjust_stock'))) && (
-                <button onClick={handleStockMove} className={btnPrimary}>Confirm Movement</button>
+                <SubmitButton onClick={handleStockMove} loading={transferStock.isPending || recordStockMove.isPending} className={btnPrimary}>Confirm Movement</SubmitButton>
               )}
             </div>
           </div>
@@ -1712,7 +1713,7 @@ export default function InventoryPage() {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowBatchModal(false)} className={btnSecondary}>Cancel</button>
-              {can('inventory.adjust_stock') && <button onClick={handleBatchUpdate} className={btnPrimary}>Apply Batch</button>}
+              {can('inventory.adjust_stock') && <SubmitButton onClick={handleBatchUpdate} loading={batchStockUpdate.isPending} className={btnPrimary}>Apply Batch</SubmitButton>}
             </div>
           </div>
         </div>

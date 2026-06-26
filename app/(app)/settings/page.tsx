@@ -37,6 +37,7 @@ import {
 import { ApiRole } from '@/types/api';
 import { Agent, Hub } from '@/types';
 import { toast } from 'sonner';
+import { SubmitButton } from '@/components/submit-button';
 import {
   Save, User, Lock, Moon, Sun, Trash2, AlertTriangle,
   Users, Plus, X, Pencil, MapPin, Building2, Shield,
@@ -88,7 +89,6 @@ export default function SettingsPage() {
   const [email, setEmail] = useState(user?.email || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [location, setLocation] = useState(user?.hubName ?? user?.location ?? 'All Hubs');
-  const [loading, setLoading] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -149,7 +149,6 @@ export default function SettingsPage() {
       toast.info('Connect to the API to save profile changes.');
       return;
     }
-    setLoading(true);
     try {
       await updateProfile.mutateAsync({
         full_name: name.trim(),
@@ -159,8 +158,6 @@ export default function SettingsPage() {
       toast.success('Profile updated.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update profile.');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -169,15 +166,12 @@ export default function SettingsPage() {
     if (!currentPassword) { toast.error('Enter your current password.'); return; }
     if (!newPassword || newPassword.length < 8) { toast.error('New password must be at least 8 characters.'); return; }
     if (newPassword !== confirmPassword) { toast.error('Passwords do not match.'); return; }
-    setLoading(true);
     try {
       await resetPassword.mutateAsync({ currentPassword, newPassword });
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
       toast.success('Password updated successfully.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update password.');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -410,7 +404,7 @@ export default function SettingsPage() {
               <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${ROLE_COLOR_MAP[user?.role as RoleName] || 'bg-muted'}`}>{user?.role}</span>
               <span className="text-xs text-muted-foreground">Role assigned by Company Admin</span>
             </div>
-            <button type="submit" disabled={loading} className={btnPrimary}><Save size={14} className="mr-2" /> Save Changes</button>
+            <SubmitButton type="submit" loading={updateProfile.isPending} className={btnPrimary}><Save size={14} className="mr-2" /> Save Changes</SubmitButton>
           </form>
 
           <form onSubmit={handlePasswordUpdate} className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
@@ -420,7 +414,7 @@ export default function SettingsPage() {
               <div className="space-y-2"><label htmlFor="new-password" className={labelCls}>New Password</label><input id="new-password" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={inputCls} autoComplete="new-password" />{newPassword && (<div className="mt-2 space-y-1"><div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className={`h-full rounded-full transition-all duration-300 ${passwordStrength.color} ${passwordStrength.width}`} /></div><p className={`text-xs font-medium ${getPasswordStrengthTextClass(passwordStrength.color)}`}>{passwordStrength.label}</p></div>)}</div>
               <div className="space-y-2"><label htmlFor="confirm-password" className={labelCls}>Confirm Password</label><input id="confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={inputCls} autoComplete="new-password" /></div>
             </div>
-            <button type="submit" disabled={loading || !HAS_API} className={btnPrimary}><Lock size={14} className="mr-2" /> Update Password</button>
+            <SubmitButton type="submit" disabled={!HAS_API} loading={resetPassword.isPending} className={btnPrimary}><Lock size={14} className="mr-2" /> Update Password</SubmitButton>
             {!HAS_API && <p className="text-xs text-muted-foreground">Connect to the API to change your password.</p>}
           </form>
         </div>
@@ -536,7 +530,7 @@ export default function SettingsPage() {
               </div>
               <div className="flex gap-2">
                 <button onClick={handleResetRoles} className={btnSecondary}><RotateCcw size={14} className="mr-2" /> Reset All</button>
-                {rolesDirty && <button onClick={handleSaveRoles} className={btnPrimary}><Save size={14} className="mr-2" /> Save Changes</button>}
+                {rolesDirty && <SubmitButton onClick={handleSaveRoles} loading={updateRole.isPending} className={btnPrimary}><Save size={14} className="mr-2" /> Save Changes</SubmitButton>}
               </div>
             </div>
 
@@ -664,7 +658,7 @@ export default function SettingsPage() {
               <p className="text-sm font-medium">Unsaved changes for <span className="text-primary">{selectedRoleLabel}</span></p>
               <div className="flex gap-2">
                 <button onClick={() => { syncRolesFromApi(); setRolesDirty(false); }} className={btnSecondary}>Discard</button>
-                <button onClick={handleSaveRoles} className={btnPrimary}><Save size={14} className="mr-2" /> Save Permissions</button>
+                <SubmitButton onClick={handleSaveRoles} loading={updateRole.isPending} className={btnPrimary}><Save size={14} className="mr-2" /> Save Permissions</SubmitButton>
               </div>
             </div>
           )}
@@ -753,7 +747,7 @@ export default function SettingsPage() {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowUserModal(false)} className={btnSecondary}>Cancel</button>
-              <button onClick={handleSaveUser} className={btnPrimary}>Save</button>
+              <SubmitButton onClick={handleSaveUser} loading={createAgent.isPending || updateAgent.isPending}>Save</SubmitButton>
             </div>
           </div>
         </div>
@@ -803,7 +797,7 @@ export default function SettingsPage() {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowHubModal(false)} className={btnSecondary}>Cancel</button>
-              <button onClick={handleSaveHub} className={btnPrimary}>Save Hub</button>
+              <SubmitButton onClick={handleSaveHub} loading={createHub.isPending || updateHub.isPending}>Save Hub</SubmitButton>
             </div>
           </div>
         </div>

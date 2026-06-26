@@ -15,6 +15,7 @@ import {
   Compensation, CompensationCategory, Customer,
 } from '@/types';
 import { toast } from 'sonner';
+import { SubmitButton } from '@/components/submit-button';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
@@ -67,7 +68,8 @@ export default function InteractionsPage() {
   const { data: feedbacks = [] } = useFeedback();
   const { data: enquiries = [] } = useEnquiries();
   const { data: compensations = [] } = useCompensations();
-  const { data: customers = [] } = useCustomers();
+  const { data: customerList } = useCustomers();
+  const customers = customerList?.items ?? [];
   const createFeedback = useCreateFeedback();
   const resolveFeedback = useResolveFeedback();
   const updateFeedbackPriority = useUpdateFeedbackPriority();
@@ -780,7 +782,7 @@ export default function InteractionsPage() {
               <div className="space-y-2"><label className="text-sm font-medium">Content *</label><textarea value={newFbContent} onChange={(e) => setNewFbContent(e.target.value)} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none" /></div>
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setShowFeedbackModal(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
-                <button type="submit" className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2">Save</button>
+                <SubmitButton type="submit" loading={createFeedback.isPending}>Save</SubmitButton>
               </div>
             </form>
           </div>
@@ -816,7 +818,7 @@ export default function InteractionsPage() {
                   <textarea value={resolutionNote} onChange={(e) => setResolutionNote(e.target.value)} placeholder="Enter resolution details..." className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none" />
                   <div className="flex justify-end gap-3">
                     <button onClick={() => setSelectedFeedback(null)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
-                    <button onClick={handleResolveFeedback} disabled={!resolutionNote} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2 disabled:opacity-50"><CheckCircle2 size={16} className="mr-2" /> Mark Resolved</button>
+                    <SubmitButton onClick={handleResolveFeedback} disabled={!resolutionNote} loading={resolveFeedback.isPending} className="gap-2"><CheckCircle2 size={16} /> Mark Resolved</SubmitButton>
                   </div>
                 </div>
               ) : (
@@ -852,7 +854,7 @@ export default function InteractionsPage() {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowEnquiryModal(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
-              <button onClick={handleSaveEnquiry} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2">Save</button>
+              <SubmitButton onClick={handleSaveEnquiry} loading={createEnquiry.isPending}>Save</SubmitButton>
             </div>
           </div>
         </div>
@@ -880,7 +882,7 @@ export default function InteractionsPage() {
                   <textarea value={enqResolution} onChange={(e) => setEnqResolution(e.target.value)} placeholder="Enter resolution details..." className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none" />
                   <div className="flex justify-end gap-3">
                     <button onClick={() => setSelectedEnquiry(null)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
-                    <button onClick={handleResolveEnquiry} disabled={!enqResolution} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2 disabled:opacity-50"><CheckCircle2 size={16} className="mr-2" /> Mark as Closed</button>
+                    <SubmitButton onClick={handleResolveEnquiry} disabled={!enqResolution} loading={resolveEnquiry.isPending} className="gap-2"><CheckCircle2 size={16} /> Mark as Closed</SubmitButton>
                   </div>
                 </div>
               ) : (
@@ -916,7 +918,7 @@ export default function InteractionsPage() {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowCompModal(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
-              <button onClick={handleSaveComp} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2">Save</button>
+              <SubmitButton onClick={handleSaveComp} loading={createCompensation.isPending}>Save</SubmitButton>
             </div>
           </div>
         </div>
@@ -933,7 +935,7 @@ export default function InteractionsPage() {
             </div>
             <div className="mt-4 flex justify-end gap-3">
               <button onClick={() => setShowCompFromFeedback(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
-              <button onClick={handleSaveCompFromFeedback} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2">Issue</button>
+              <SubmitButton onClick={handleSaveCompFromFeedback} loading={createCompensation.isPending}>Issue</SubmitButton>
             </div>
           </div>
         </div>

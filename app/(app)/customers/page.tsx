@@ -1,11 +1,11 @@
 'use client';
 
-import { useRef, useState, useMemo } from 'react';
+import { useRef, useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useCustomers, useCreateCustomer, useUpdateCustomer, useAgents,
   useCustomerCredits, useSales, useFeedback, useEnquiries, useCompensations, useHubs,
-  useDownloadCustomerImportTemplate, useValidateCustomerImport, useImportCustomers,
+  useDownloadCustomerImportTemplate, useValidateCustomerImport, useImportCustomers, useSegments,
 } from '@/hooks/use-queries';
 import {
   Customer, CustomerType, PREDEFINED_SEGMENTS,
@@ -18,10 +18,11 @@ import type {
   CustomerImportRowStatus,
 } from '@/types/api';
 import { toast } from 'sonner';
-import { isPlaceholderEmail } from '@/lib/customer-helpers';
+import { isPlaceholderEmail, isB2bCustomerType, customerPhoneForApi } from '@/lib/customer-helpers';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
+import { SubmitButton } from '@/components/submit-button';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer,
 } from 'recharts';
@@ -85,16 +86,51 @@ const customerImportStatusStyles: Record<CustomerImportRowStatus, string> = {
   failed: 'bg-red-100 text-red-700',
 };
 
+const CUSTOMERS_PAGE_SIZE = 20;
+
 export default function CustomersPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const hubScope = useHubScopeFilter();
-  const { data: customers = [] } = useCustomers({ hub_id: hubScope.hubIdForApi });
-  const { data: agents = [] } = useAgents();
-  const { data: sales = [] } = useSales();
-  const { data: feedback = [] } = useFeedback();
-  const { data: enquiries = [] } = useEnquiries();
-  const { data: compensations = [] } = useCompensations();
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<CustomerType | 'All'>('All');
+  const [filterSegment, setFilterSegment] = useState<string>('All');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [page, setPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  const { data: segments = [] } = useSegments();
+  const segmentId = filterSegment === 'All'
+    ? undefined
+    : segments.find((s) => s.name === filterSegment)?.id;
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, filterType, filterSegment, hubScope.hubIdForApi]);
+
+  const { data: customerList, isLoading: customersLoading, isFetching: customersFetching } = useCustomers({
+    search: debouncedSearch || undefined,
+    type: filterType === 'All' ? undefined : filterType,
+    hub_id: hubScope.hubIdForApi,
+    segment_id: segmentId,
+    page,
+    limit: CUSTOMERS_PAGE_SIZE,
+  });
+  const customers = customerList?.items ?? [];
+  const customerMeta = customerList?.meta ?? { page: 1, limit: CUSTOMERS_PAGE_SIZE, total: 0, totalPages: 1 };
+  const kpis = customerList?.summary ?? { total: 0, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 };
+  const { data: agents = [] } = useAgents(undefined, { enabled: showAddModal });
+  const detailDataEnabled = !!selectedCustomer;
+  const { data: sales = [] } = useSales(undefined, { enabled: detailDataEnabled });
+  const { data: feedback = [] } = useFeedback(undefined, { enabled: detailDataEnabled });
+  const { data: enquiries = [] } = useEnquiries(undefined, { enabled: detailDataEnabled });
+  const { data: compensations = [] } = useCompensations(undefined, { enabled: detailDataEnabled });
   const { data: hubs = [] } = useHubs();
   const activeHubs = hubs.filter(h => h.isActive);
   const createCustomer = useCreateCustomer();
@@ -104,13 +140,8 @@ export default function CustomersPage() {
   const importCustomers = useImportCustomers();
   const customerImportInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<CustomerType | 'All'>('All');
-  const [filterSegment, setFilterSegment] = useState<string>('All');
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const { data: customerCredits = [] } = useCustomerCredits(selectedCustomer?.id ?? null);
   const [detailTab, setDetailTab] = useState<DetailTab>('overview');
+  const { data: customerCredits = [] } = useCustomerCredits(selectedCustomer?.id ?? null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Customer>>({});
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -207,35 +238,16 @@ export default function CustomersPage() {
     return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-black border ${colors[grade] || colors['N/A']}`}>SCORE {grade}</span>;
   };
 
-  // --- KPI calculations ---
-  const kpis = useMemo(() => {
-    const total = customers.length;
-    const b2b = customers.filter((c) => c.type === CustomerType.B2B).length;
-    const b2c = customers.filter((c) => c.type === CustomerType.B2C).length;
-    const repeat = customers.filter((c) => c.totalOrders > 1).length;
-    const totalRevenue = customers.reduce((a, c) => a + c.totalSpent, 0);
-    const avgValue = total > 0 ? totalRevenue / total : 0;
-    return { total, b2b, b2c, repeat, totalRevenue, avgValue };
-  }, [customers]);
-
-  // --- Filtering ---
-  const activeSegments = useMemo(() => {
-    const segs = new Set<string>();
-    customers.forEach((c) => c.segments?.forEach((s) => segs.add(s)));
-    return Array.from(segs).sort((a, b) => a.localeCompare(b));
-  }, [customers]);
-
-  const filteredCustomers = useMemo(() => customers.filter((c) => {
-    const matchSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.companyName && c.companyName.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchSegment = filterSegment === 'All' || c.segments?.includes(filterSegment);
-    return matchSearch && (filterType === 'All' || c.type === filterType) && hubScope.matchesHub(c.location) && matchSegment;
-  }), [customers, searchTerm, filterType, hubScope, filterSegment]);
+  // --- KPI calculations (from API summary for current filters) ---
+  // kpis comes from customerList.summary above
 
   // --- Add Customer ---
   const handleSaveCustomer = () => {
     if (!newCustomer.name || !newCustomer.email) { toast.error('Please enter Name and Email.'); return; }
+    if (isB2bCustomerType(newCustomer.type) && !newCustomer.companyName?.trim()) {
+      toast.error('Company name is required for B2B customers.');
+      return;
+    }
     if (!isPlaceholderEmail(newCustomer.email)) {
       const dup = customers.find((c) => c.email.toLowerCase() === newCustomer.email!.toLowerCase());
       if (dup) { toast.error(`A customer with email "${newCustomer.email}" already exists.`); return; }
@@ -244,7 +256,7 @@ export default function CustomersPage() {
     createCustomer.mutate({
       customer_name: newCustomer.name!,
       customer_email: newCustomer.email!,
-      customer_phone: newCustomer.phone || '0000000000',
+      customer_phone: customerPhoneForApi(newCustomer.phone),
       customer_type: newCustomer.type as CustomerType,
       customer_location: hub?.id || activeHubs[0]?.id || '',
       company_name: newCustomer.companyName,
@@ -273,12 +285,16 @@ export default function CustomersPage() {
 
   const handleUpdateCustomer = () => {
     if (!editForm.name || !editForm.email || !selectedCustomer) { toast.error('Name and Email are required.'); return; }
+    if (isB2bCustomerType(editForm.type) && !editForm.companyName?.trim()) {
+      toast.error('Company name is required for B2B customers.');
+      return;
+    }
     const hub = activeHubs.find((h) => h.name === editForm.location);
     updateCustomer.mutate({
       id: selectedCustomer.id,
       customer_name: editForm.name,
       customer_email: editForm.email,
-      customer_phone: editForm.phone,
+      customer_phone: customerPhoneForApi(editForm.phone),
       customer_type: editForm.type,
       customer_location: hub?.id,
       company_name: editForm.companyName,
@@ -486,17 +502,20 @@ export default function CustomersPage() {
             </select>
           </div>
           <HubScopeFilterBar scope={hubScope} />
-          {activeSegments.length > 0 && (
+          {segments.length > 0 && (
             <div className="flex items-center gap-2 border rounded-md px-3 py-2 bg-background">
               <Heart size={14} className="text-muted-foreground" />
               <select value={filterSegment} onChange={(e) => setFilterSegment(e.target.value)} className="bg-transparent border-none text-sm font-medium focus:outline-none">
                 <option value="All">All Segments</option>
-                {activeSegments.map((s) => <option key={s} value={s}>{s}</option>)}
+                {segments.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
               </select>
             </div>
           )}
         </div>
-        <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">{filteredCustomers.length} customer{filteredCustomers.length !== 1 ? 's' : ''}</span>
+        <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
+          {customerMeta.total} customer{customerMeta.total !== 1 ? 's' : ''}
+          {(customersLoading || customersFetching) && ' · Loading...'}
+        </span>
       </div>
 
       {/* Customer Table */}
@@ -516,7 +535,7 @@ export default function CustomersPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredCustomers.map((customer) => {
+              {customers.map((customer) => {
                 const status = getStatus(customer);
                 const grade = getGrade(customer);
                 const creditGrade = calculateScore(customer.id);
@@ -574,9 +593,38 @@ export default function CustomersPage() {
                   </tr>
                 );
               })}
-              {filteredCustomers.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No customers found matching your filters.</td></tr>}
+              {customers.length === 0 && !customersLoading && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No customers found matching your filters.</td></tr>}
+              {customersLoading && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">Loading customers...</td></tr>}
             </tbody>
           </table>
+        </div>
+        <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {customerMeta.total === 0
+              ? 'No customers to show'
+              : `Showing ${(customerMeta.page - 1) * customerMeta.limit + 1}–${Math.min(customerMeta.page * customerMeta.limit, customerMeta.total)} of ${customerMeta.total}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={customerMeta.page <= 1 || customersLoading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-muted-foreground px-2">
+              Page {customerMeta.page} of {customerMeta.totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={customerMeta.page >= customerMeta.totalPages || customersLoading}
+              onClick={() => setPage((p) => p + 1)}
+              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -589,8 +637,10 @@ export default function CustomersPage() {
               <div className="space-y-2"><label className="text-sm font-medium">Full Name *</label><input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
               <div className="space-y-2"><label className="text-sm font-medium">Email *</label><input type="email" value={newCustomer.email} onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
               <div className="space-y-2"><label className="text-sm font-medium">Phone</label><input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
-              <div className="space-y-2"><label className="text-sm font-medium">Company (Optional)</label><input type="text" value={newCustomer.companyName} onChange={(e) => setNewCustomer({ ...newCustomer, companyName: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
-              <div className="space-y-2"><label className="text-sm font-medium">Type</label><select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value as CustomerType })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value={CustomerType.B2C}>B2C</option><option value={CustomerType.B2B}>B2B</option></select></div>
+              <div className="space-y-2"><label className="text-sm font-medium">Type</label><select value={newCustomer.type} onChange={(e) => { const type = e.target.value as CustomerType; setNewCustomer({ ...newCustomer, type, companyName: type === CustomerType.B2C ? '' : newCustomer.companyName }); }} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value={CustomerType.B2C}>B2C</option><option value={CustomerType.B2B}>B2B</option></select></div>
+              {isB2bCustomerType(newCustomer.type) && (
+                <div className="space-y-2"><label className="text-sm font-medium">Company *</label><input type="text" value={newCustomer.companyName} onChange={(e) => setNewCustomer({ ...newCustomer, companyName: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" /></div>
+              )}
               <div className="space-y-2"><label className="text-sm font-medium">Location</label>
                 <select value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                   {activeHubs.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
@@ -645,7 +695,7 @@ export default function CustomersPage() {
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowAddModal(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
-              <button onClick={handleSaveCustomer} className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2">Save Customer</button>
+              <SubmitButton onClick={handleSaveCustomer} loading={createCustomer.isPending}>Save Customer</SubmitButton>
             </div>
           </div>
         </div>
@@ -922,15 +972,17 @@ export default function CustomersPage() {
                       <input type="text" value={editForm.phone || ''} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Company</label>
-                      <input type="text" value={editForm.companyName || ''} onChange={(e) => setEditForm({ ...editForm, companyName: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
-                    </div>
-                    <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Type</label>
-                      <select value={editForm.type || CustomerType.B2C} onChange={(e) => setEditForm({ ...editForm, type: e.target.value as CustomerType })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
+                      <select value={editForm.type || CustomerType.B2C} onChange={(e) => { const type = e.target.value as CustomerType; setEditForm({ ...editForm, type, companyName: type === CustomerType.B2C ? '' : editForm.companyName }); }} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
                         <option value={CustomerType.B2C}>B2C</option><option value={CustomerType.B2B}>B2B</option>
                       </select>
                     </div>
+                    {isB2bCustomerType(editForm.type) && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">Company *</label>
+                        <input type="text" value={editForm.companyName || ''} onChange={(e) => setEditForm({ ...editForm, companyName: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
+                      </div>
+                    )}
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Location</label>
                       <select value={editForm.location || hubScope.hubName || activeHubs[0]?.name} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
@@ -984,7 +1036,7 @@ export default function CustomersPage() {
                   <div className="flex justify-end gap-3 pt-2">
                     <button onClick={() => setIsEditing(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
                     {can('customers.edit') && (
-                      <button onClick={handleUpdateCustomer} className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4 py-2"><Save size={14} /> Save Changes</button>
+                      <SubmitButton onClick={handleUpdateCustomer} loading={updateCustomer.isPending} className="gap-1.5"><Save size={14} /> Save Changes</SubmitButton>
                     )}
                   </div>
                 </div>
