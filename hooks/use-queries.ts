@@ -102,27 +102,56 @@ function defaultCustomerListSummary(total: number): CustomerListSummary {
   return { total, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 };
 }
 
+function isPaginatedCustomerList(value: unknown): value is ApiCustomerListResponse {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'meta' in value &&
+    'data' in value &&
+    Array.isArray((value as ApiCustomerListResponse).data)
+  );
+}
+
 function parseCustomerListResponse(raw: unknown): {
   data: ApiCustomer[];
   meta: CustomerListResult['meta'];
   summary: CustomerListSummary;
 } {
-  const payload = (raw as ApiListResponse<ApiCustomerListResponse>)?.data ?? raw;
-  if (Array.isArray(payload)) {
-    return {
-      data: payload,
-      meta: { page: 1, limit: payload.length, total: payload.length, totalPages: 1 },
-      summary: defaultCustomerListSummary(payload.length),
-    };
+  let body: unknown = raw;
+
+  if (
+    body &&
+    typeof body === 'object' &&
+    'message' in body &&
+    'data' in body &&
+    !('meta' in body)
+  ) {
+    body = (body as ApiListResponse<ApiCustomerListResponse>).data;
   }
-  if (payload && typeof payload === 'object' && 'data' in payload) {
-    const list = payload as ApiCustomerListResponse;
+
+  if (isPaginatedCustomerList(body)) {
+    const list = body;
+    const meta = list.meta ?? {
+      page: 1,
+      limit: list.data?.length ?? 0,
+      total: 0,
+      totalPages: 1,
+    };
     return {
       data: list.data ?? [],
-      meta: list.meta ?? { page: 1, limit: list.data?.length ?? 0, total: list.data?.length ?? 0, totalPages: 1 },
-      summary: list.summary ?? defaultCustomerListSummary(list.meta?.total ?? list.data?.length ?? 0),
+      meta,
+      summary: list.summary ?? defaultCustomerListSummary(meta.total),
     };
   }
+
+  if (Array.isArray(body)) {
+    return {
+      data: body,
+      meta: { page: 1, limit: body.length, total: body.length, totalPages: 1 },
+      summary: defaultCustomerListSummary(body.length),
+    };
+  }
+
   return { data: [], meta: EMPTY_CUSTOMER_LIST.meta, summary: EMPTY_CUSTOMER_LIST.summary };
 }
 
