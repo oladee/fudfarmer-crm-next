@@ -9,7 +9,17 @@ export const ROLE_COLOR_MAP: Record<RoleName, string> = {
   'Customer Success': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
 };
 
-export type ConfirmActionType = 'deleteUser' | 'deleteHub' | 'resetData' | 'resetRoles';
+const CUSTOM_ROLE_COLOR = 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+
+export function getRoleBadgeClasses(label: string): string {
+  return ROLE_COLOR_MAP[label as RoleName] ?? CUSTOM_ROLE_COLOR;
+}
+
+export function getRoleDotClass(label: string): string {
+  return getRoleBadgeClasses(label).split(' ')[0];
+}
+
+export type ConfirmActionType = 'deleteUser' | 'deleteHub' | 'deleteRole' | 'resetData' | 'resetRoles';
 
 export function getPasswordStrength(password: string): { label: string; color: string; width: string } {
   if (!password) return { label: '', color: '', width: 'w-0' };
@@ -42,8 +52,11 @@ export function getConfirmActionMessage(type: ConfirmActionType): string {
   if (type === 'deleteHub') {
     return 'This will permanently delete this hub. Ensure no team members, inventory, or customers are assigned to it.';
   }
+  if (type === 'deleteRole') {
+    return 'This will permanently delete this custom role. Users assigned to it may lose access until reassigned.';
+  }
   if (type === 'resetRoles') {
-    return 'This will reset all role permissions to their factory defaults. Any custom changes will be lost.';
+    return 'This will reset system role permissions to their factory defaults. Custom roles are not affected.';
   }
   return 'This will erase all CRM data and restore factory defaults. This action cannot be undone.';
 }
@@ -112,6 +125,7 @@ type ConfirmActionDeps = {
   systemRoles: ApiRole[];
   onDeleteUser: (id: string) => Promise<unknown>;
   onDeleteHub: (id: string) => Promise<unknown>;
+  onDeleteRole?: (id: string) => Promise<unknown>;
   onUpdateRole: (id: string, permissions: { module: string; submodules: string[] }[]) => Promise<unknown>;
   syncRolesFromApi: () => void;
   setRolesDirty: (dirty: boolean) => void;
@@ -146,6 +160,11 @@ export async function runConfirmAction(action: ConfirmAction, deps: ConfirmActio
   }
   if (action.type === 'deleteHub' && action.payload) {
     await deps.onDeleteHub(action.payload);
+    return;
+  }
+  if (action.type === 'deleteRole' && action.payload) {
+    if (!deps.onDeleteRole) throw new Error('Role deletion is not available.');
+    await deps.onDeleteRole(action.payload);
     return;
   }
   if (action.type === 'resetData') {

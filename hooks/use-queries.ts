@@ -287,7 +287,12 @@ export function useRoles() {
 export function useCreateRole() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: object) => axiosPost('roles', dto, true),
+    mutationFn: async (dto: {
+      name: string;
+      label: string;
+      description?: string;
+      permissions?: { module: string; submodules: string[] }[];
+    }) => axiosPost('roles', dto, true) as Promise<ApiRole>,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['roles'] }),
   });
 }

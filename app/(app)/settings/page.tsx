@@ -5,13 +5,13 @@ import { useAuth } from '@/contexts/auth-context';
 import {
   useAgents, useCreateAgent, useUpdateAgent, useDeleteAgent,
   useHubs, useCreateHub, useUpdateHub, useDeleteHub,
-  useRoles, useUpdateRole, useResetPassword, useUpdateProfile,
+  useRoles, useCreateRole, useUpdateRole, useDeleteRole, useResetPassword, useUpdateProfile,
 } from '@/hooks/use-queries';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useDataScope } from '@/hooks/use-data-scope';
 import { HAS_API } from '@/lib/require-api';
 import {
-  PERMISSION_GROUPS, Permission, RoleName,
+  PERMISSION_GROUPS, Permission,
 } from '@/lib/permissions';
 import {
   buildRolePermissionsMap,
@@ -21,7 +21,8 @@ import {
   roleLabel,
 } from '@/lib/role-permissions';
 import {
-  ROLE_COLOR_MAP,
+  getRoleBadgeClasses,
+  getRoleDotClass,
   countGroupPermissions,
   formatHubCountLabel,
   getConfirmActionMessage,
@@ -33,6 +34,7 @@ import {
   resolveUserHubId,
   runConfirmAction,
   validateUserSave,
+  type ConfirmActionType,
 } from '@/lib/settings-helpers';
 import { ApiRole } from '@/types/api';
 import { Agent, Hub } from '@/types';
@@ -66,16 +68,26 @@ export default function SettingsPage() {
   const updateHub = useUpdateHub();
   const deleteHub = useDeleteHub();
   const updateRole = useUpdateRole();
+  const createRole = useCreateRole();
+  const deleteRole = useDeleteRole();
   const resetPassword = useResetPassword();
   const updateProfile = useUpdateProfile();
   const { can } = usePermissions();
 
-  const systemRoles: ApiRole[] = useMemo(() => {
+  const allRoles: ApiRole[] = useMemo(() => {
     if (!HAS_API || apiRoles.length === 0) return [];
-    return [...apiRoles]
-      .filter((r) => r.is_system !== false)
-      .sort((a, b) => a.label.localeCompare(b.label));
+    return [...apiRoles].sort((a, b) => {
+      const aSystem = a.is_system !== false ? 0 : 1;
+      const bSystem = b.is_system !== false ? 0 : 1;
+      if (aSystem !== bSystem) return aSystem - bSystem;
+      return a.label.localeCompare(b.label);
+    });
   }, [apiRoles]);
+
+  const systemRolesOnly: ApiRole[] = useMemo(
+    () => allRoles.filter((r) => r.is_system !== false),
+    [allRoles],
+  );
 
   const canManageUsers = can('settings.manage_users');
   const canManageHubs = can('settings.manage_hubs');
@@ -95,11 +107,13 @@ export default function SettingsPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<Partial<Agent>>({ role: 'Hub Manager', location: activeHubs[0]?.name || 'Lagos' });
-  const [confirmAction, setConfirmAction] = useState<{ type: 'deleteUser' | 'deleteHub' | 'resetData' | 'resetRoles'; payload?: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ type: ConfirmActionType; payload?: string } | null>(null);
 
   // Hub management state
   const [showHubModal, setShowHubModal] = useState(false);
   const [editingHub, setEditingHub] = useState<Partial<Hub>>({ isActive: true });
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [newRole, setNewRole] = useState({ label: '', description: '' });
 
   // Roles & Permissions state
   const [rolePerms, setRolePerms] = useState<Record<string, Permission[]>>({});
@@ -108,8 +122,8 @@ export default function SettingsPage() {
   const [rolesDirty, setRolesDirty] = useState(false);
 
   const selectedRoleRecord = useMemo(
-    () => systemRoles.find((r) => r._id === selectedRoleId) ?? systemRoles[0],
-    [systemRoles, selectedRoleId],
+    () => allRoles.find((r) => r._id === selectedRoleId) ?? allRoles[0],
+    [allRoles, selectedRoleId],
   );
   const selectedRoleLabel = selectedRoleRecord ? roleLabel(selectedRoleRecord) : 'Hub Manager';
 
@@ -334,6 +348,35 @@ export default function SettingsPage() {
     setConfirmAction({ type: 'resetRoles' });
   };
 
+  const handleCreateRole = async (e: SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const trimmedLabel = newRole.label.trim();
+    if (!trimmedLabel) {
+      toast.error('Role name is required.');
+      return;
+    }
+    const slug = trimmedLabel.toLowerCase().replace(/\s+/g, '_');
+    try {
+      const created = await createRole.mutateAsync({
+        name: slug,
+        label: trimmedLabel,
+        description: newRole.description.trim() || undefined,
+        permissions: fePermissionsToApiInput([]),
+      });
+      setShowRoleModal(false);
+      setNewRole({ label: '', description: '' });
+      setSelectedRoleId(created._id);
+      setRolePerms((prev) => ({ ...prev, [created._id]: [] }));
+      toast.success(`Role "${trimmedLabel}" created.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create role.');
+    }
+  };
+
+  const handleDeleteRole = (id: string) => {
+    setConfirmAction({ type: 'deleteRole', payload: id });
+  };
+
   const selectedPerms = rolePerms[rolePermKey] || [];
   const totalPerms = PERMISSION_GROUPS.reduce((sum, g) => sum + g.permissions.length, 0);
   const isAdminRoleSelected = selectedRoleRecord
@@ -341,21 +384,24 @@ export default function SettingsPage() {
     : false;
 
   const roleTabs = useMemo(
-    () => systemRoles.map((r) => ({
+    () => allRoles.map((r) => ({
       id: r._id,
-      label: roleLabel(r) as RoleName,
+      label: roleLabel(r),
+      isCustom: r.is_system === false,
     })),
-    [systemRoles],
+    [allRoles],
   );
 
   const executeConfirmAction = async () => {
     if (!confirmAction) return;
+    const action = confirmAction;
     try {
-      await runConfirmAction(confirmAction, {
+      await runConfirmAction(action, {
         hasApi: HAS_API,
-        systemRoles,
+        systemRoles: systemRolesOnly,
         onDeleteUser: (id) => deleteAgent.mutateAsync(id),
         onDeleteHub: (id) => deleteHub.mutateAsync(id),
+        onDeleteRole: (id) => deleteRole.mutateAsync(id),
         onUpdateRole: (id, permissions) => updateRole.mutateAsync({ id, permissions }),
         syncRolesFromApi,
         setRolesDirty,
@@ -363,9 +409,15 @@ export default function SettingsPage() {
         fePermissionsToApiInput,
         isCompanyAdminRole,
       });
-      if (confirmAction.type === 'deleteUser') toast.success('User deleted.');
-      else if (confirmAction.type === 'deleteHub') toast.success('Hub deleted.');
-      else if (confirmAction.type === 'resetRoles') toast.success('All role permissions reset to defaults.');
+      if (action.type === 'deleteUser') toast.success('User deleted.');
+      else if (action.type === 'deleteHub') toast.success('Hub deleted.');
+      else if (action.type === 'deleteRole') {
+        if (selectedRoleId === action.payload) {
+          const remaining = allRoles.filter((r) => r._id !== action.payload);
+          setSelectedRoleId(remaining[0]?._id ?? '');
+        }
+        toast.success('Role deleted.');
+      } else if (action.type === 'resetRoles') toast.success('System role permissions reset to defaults.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Action failed.');
     }
@@ -401,7 +453,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="flex items-center gap-3 pt-2">
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${ROLE_COLOR_MAP[user?.role as RoleName] || 'bg-muted'}`}>{user?.role}</span>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${getRoleBadgeClasses(user?.role ?? '')}`}>{user?.role}</span>
               <span className="text-xs text-muted-foreground">Role assigned by Company Admin</span>
             </div>
             <SubmitButton type="submit" loading={updateProfile.isPending} className={btnPrimary}><Save size={14} className="mr-2" /> Save Changes</SubmitButton>
@@ -435,7 +487,7 @@ export default function SettingsPage() {
                   <div>
                     <p className="font-medium">{agent.name}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_COLOR_MAP[agent.role] || 'bg-muted'}`}>{agent.role}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${getRoleBadgeClasses(agent.role)}`}>{agent.role}</span>
                       <span className="text-xs text-muted-foreground">{agent.email} &middot; {agent.location}</span>
                     </div>
                   </div>
@@ -529,6 +581,9 @@ export default function SettingsPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">Configure what each role can access and do across the CRM.</p>
               </div>
               <div className="flex gap-2">
+                {canManageRoles && (
+                  <button onClick={() => setShowRoleModal(true)} className={btnPrimary}><Plus size={14} className="mr-2" /> Add Role</button>
+                )}
                 <button onClick={handleResetRoles} className={btnSecondary}><RotateCcw size={14} className="mr-2" /> Reset All</button>
                 {rolesDirty && <SubmitButton onClick={handleSaveRoles} loading={updateRole.isPending} className={btnPrimary}><Save size={14} className="mr-2" /> Save Changes</SubmitButton>}
               </div>
@@ -548,8 +603,11 @@ export default function SettingsPage() {
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${ROLE_COLOR_MAP[role.label].split(' ')[0]}`} />
+                      <span className={`h-2 w-2 rounded-full ${getRoleDotClass(role.label)}`} />
                       <span>{role.label}</span>
+                      {role.isCustom && (
+                        <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">Custom</span>
+                      )}
                       <span className="text-[10px] text-muted-foreground font-normal">{count}/{totalPerms}</span>
                     </div>
                   </button>
@@ -561,6 +619,18 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm">
                 <Shield size={16} className="text-amber-600 shrink-0" />
                 <span className="text-amber-800 dark:text-amber-300">Company Admin always has full access to all features. Permissions cannot be modified.</span>
+              </div>
+            )}
+
+            {canManageRoles && selectedRoleRecord?.is_system === false && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteRole(selectedRoleId)}
+                  className="inline-flex items-center rounded-md text-sm font-medium border border-destructive/30 text-destructive hover:bg-destructive/10 h-9 px-4 py-2"
+                >
+                  <Trash2 size={14} className="mr-2" /> Delete Role
+                </button>
               </div>
             )}
           </div>
@@ -711,7 +781,7 @@ export default function SettingsPage() {
               <div className="space-y-2"><label htmlFor="user-email" className={labelCls}>Email *</label><input id="user-email" type="email" value={editingUser.email || ''} onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })} className={inputCls} /></div>
               <div className="space-y-2"><label htmlFor="user-phone" className={labelCls}>Phone</label><input id="user-phone" type="text" value={editingUser.phone || ''} onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })} className={inputCls} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2"><label htmlFor="user-role" className={labelCls}>Role</label><select id="user-role" value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value as Agent['role'] })} className={inputCls} disabled={!canSwitchHubs && !!editingUser.id}><option>Company Admin</option><option>Hub Manager</option><option>Finance</option><option>Customer Success</option></select></div>
+                <div className="space-y-2"><label htmlFor="user-role" className={labelCls}>Role</label><select id="user-role" value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })} className={inputCls} disabled={!canSwitchHubs && !!editingUser.id}>{apiRoles.map((r) => (<option key={r._id} value={roleLabel(r)}>{roleLabel(r)}</option>))}</select></div>
                 <div className="space-y-2"><label htmlFor="user-hub" className={labelCls}>Hub</label>
                   <select
                     id="user-hub"
@@ -803,6 +873,46 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* ══════ ROLE MODAL ══════ */}
+      {showRoleModal && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">Add Role</h2>
+              <button type="button" onClick={() => setShowRoleModal(false)}><X size={20} /></button>
+            </div>
+            <form onSubmit={handleCreateRole} className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="role-label" className={labelCls}>Role name *</label>
+                <input
+                  id="role-label"
+                  type="text"
+                  value={newRole.label}
+                  onChange={(e) => setNewRole({ ...newRole, label: e.target.value })}
+                  placeholder="e.g. Warehouse Lead"
+                  className={inputCls}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="role-description" className={labelCls}>Description</label>
+                <textarea
+                  id="role-description"
+                  value={newRole.description}
+                  onChange={(e) => setNewRole({ ...newRole, description: e.target.value })}
+                  placeholder="Optional description for this role"
+                  className={`${inputCls} min-h-[80px] py-2`}
+                />
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <button type="button" onClick={() => setShowRoleModal(false)} className={btnSecondary}>Cancel</button>
+                <SubmitButton type="submit" loading={createRole.isPending}>Create Role</SubmitButton>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ══════ CONFIRM MODAL ══════ */}
       {confirmAction && (
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -819,7 +929,13 @@ export default function SettingsPage() {
               </div>
               <div className="flex gap-3 w-full">
                 <button onClick={() => setConfirmAction(null)} className={`flex-1 justify-center ${btnSecondary}`}>Cancel</button>
-                <button onClick={executeConfirmAction} className="flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium bg-destructive text-white hover:bg-destructive/90 h-9 px-4 py-2">Confirm</button>
+                <button
+                  onClick={executeConfirmAction}
+                  disabled={deleteRole.isPending || deleteAgent.isPending || deleteHub.isPending || updateRole.isPending}
+                  className="flex-1 inline-flex items-center justify-center rounded-md text-sm font-medium bg-destructive text-white hover:bg-destructive/90 h-9 px-4 py-2 disabled:opacity-50"
+                >
+                  Confirm
+                </button>
               </div>
             </div>
           </div>

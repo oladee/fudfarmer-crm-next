@@ -232,7 +232,7 @@ export interface Agent {
   name: string;
   email: string;
   phone: string;
-  role: 'Company Admin' | 'Hub Manager' | 'Finance' | 'Customer Success';
+  role: string;
   location: string;
   joinedDate: string;
   avatar?: string;
