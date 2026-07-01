@@ -11,12 +11,13 @@ import {
   Customer, CustomerType, PREDEFINED_SEGMENTS,
   CreditGrade,
 } from '@/types';
-import type {
+import {
   CustomerImportPreviewRow,
   CustomerImportResult,
   CustomerImportSummaryRow,
   CustomerImportRowStatus,
 } from '@/types/api';
+import { CustomerImportModal } from './customer-import-modal';
 import { toast } from 'sonner';
 import { isPlaceholderEmail, isB2bCustomerType, customerPhoneForApi } from '@/lib/customer-helpers';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -51,18 +52,13 @@ function buildCustomerImportSummaryRows(
     if (!row.valid) {
       status = 'invalid';
       reasons.push(...row.errors);
-    } else if (row.skipped) {
-      status = 'skipped';
-      reasons.push(...row.warnings);
     } else if (result) {
       if (!result.success) {
         status = 'failed';
         if (result.error) reasons.push(result.error);
-      } else if (result.skipped) {
-        status = 'skipped';
-        reasons.push('Customer name already exists; row will be skipped.');
       } else {
         status = 'imported';
+        if (row.warnings.length > 0) reasons.push(...row.warnings);
       }
     } else {
       status = 'failed';
@@ -147,15 +143,21 @@ export default function CustomersPage() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [newSegmentInput, setNewSegmentInput] = useState('');
   const [editSegmentInput, setEditSegmentInput] = useState('');
-  const [customerImportProgress, setCustomerImportProgress] = useState<{
-    stage: 'validating' | 'importing';
-    fileName: string;
+  const [customerImportPreview, setCustomerImportPreview] = useState<CustomerImportPreviewRow[]>([]);
+  const [customerImportValidateSummary, setCustomerImportValidateSummary] = useState<{
+    total: number;
+    valid: number;
+    invalid: number;
+    warnings: number;
   } | null>(null);
+  const [showCustomerImportModal, setShowCustomerImportModal] = useState(false);
+  const [customerImportFileName, setCustomerImportFileName] = useState('');
+  const [customerImporting, setCustomerImporting] = useState(false);
   const [customerImportSummary, setCustomerImportSummary] = useState<{
     fileName: string;
     total: number;
     imported: number;
-    skipped: number;
+    warnings: number;
     invalid: number;
     failed: number;
     rows: CustomerImportSummaryRow[];
@@ -378,55 +380,77 @@ export default function CustomersPage() {
     setIsEditing(false);
   };
 
-  const handleCustomerImportFile = async (file?: File) => {
+  const handleCustomerImportFile = (file?: File) => {
     if (!file) return;
     setCustomerImportSummary(null);
-    setCustomerImportProgress({ stage: 'validating', fileName: file.name });
+    setCustomerImportPreview([]);
+    setCustomerImportValidateSummary(null);
+    setCustomerImportFileName(file.name);
+    setShowCustomerImportModal(true);
+    validateCustomerImport.mutate(file, {
+      onSuccess: (validation) => {
+        setCustomerImportPreview(validation.rows);
+        setCustomerImportValidateSummary(validation.summary);
+        if (validation.summary.total === 0) {
+          toast.error('No customer rows found in the workbook.');
+          setShowCustomerImportModal(false);
+        }
+      },
+      onError: (err) => {
+        toast.error(err instanceof Error ? err.message : 'Customer import validation failed.');
+        setShowCustomerImportModal(false);
+      },
+      onSettled: () => {
+        if (customerImportInputRef.current) customerImportInputRef.current.value = '';
+      },
+    });
+  };
+
+  const handleCustomerImportConfirm = async () => {
+    const previewSnapshot = customerImportPreview;
+    const rows = previewSnapshot
+      .filter((row) => row.valid && row.resolved)
+      .map((row) => row.resolved!);
+    if (rows.length === 0) {
+      toast.error('No valid rows to import.');
+      return;
+    }
+    setCustomerImporting(true);
     try {
-      const validation = await validateCustomerImport.mutateAsync(file);
-      const skipped = validation.summary.skipped ?? 0;
-      const invalid = validation.summary.invalid ?? 0;
-      const total = validation.summary.total ?? validation.rows.length;
-      const rows = validation.rows
-        .filter((row) => row.valid && !row.skipped && row.resolved)
-        .map((row) => row.resolved);
-      if (rows.length === 0) {
-        setCustomerImportSummary({
-          fileName: file.name,
-          total,
-          imported: 0,
-          skipped,
-          invalid,
-          failed: 0,
-          rows: buildCustomerImportSummaryRows(validation.rows),
-        });
-        toast.warning(`No new customers to import. ${skipped} row(s) skipped, ${invalid} invalid.`);
-        return;
-      }
-      setCustomerImportProgress({ stage: 'importing', fileName: file.name });
       const result = await importCustomers.mutateAsync(rows);
       const importFailed = result.failed ?? 0;
-      const importSkipped = result.skipped ?? 0;
       const imported = result.imported ?? 0;
+      const warnings = customerImportValidateSummary?.warnings ?? 0;
+      const invalid = customerImportValidateSummary?.invalid ?? 0;
+      const total = customerImportValidateSummary?.total ?? previewSnapshot.length;
+      setShowCustomerImportModal(false);
+      setCustomerImportPreview([]);
+      setCustomerImportValidateSummary(null);
       setCustomerImportSummary({
-        fileName: file.name,
+        fileName: customerImportFileName,
         total,
         imported,
-        skipped: skipped + importSkipped,
+        warnings,
         invalid,
         failed: importFailed,
-        rows: buildCustomerImportSummaryRows(validation.rows, result.results),
+        rows: buildCustomerImportSummaryRows(previewSnapshot, result.results),
       });
-      if (skipped > 0 || invalid > 0 || importFailed > 0) {
-        toast.warning(`${skipped + importSkipped} duplicate row(s) skipped, ${invalid} invalid, ${importFailed} failed.`);
+      if (warnings > 0 || invalid > 0 || importFailed > 0) {
+        toast.warning(`${warnings} row(s) had warnings, ${invalid} invalid, ${importFailed} failed.`);
       }
       toast.success(`Imported ${imported} customer(s).`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Customer import failed.');
     } finally {
-      setCustomerImportProgress(null);
-      if (customerImportInputRef.current) customerImportInputRef.current.value = '';
+      setCustomerImporting(false);
     }
+  };
+
+  const closeCustomerImportModal = () => {
+    if (customerImporting) return;
+    setShowCustomerImportModal(false);
+    setCustomerImportPreview([]);
+    setCustomerImportValidateSummary(null);
   };
 
   // --- Render ---
@@ -701,19 +725,16 @@ export default function CustomersPage() {
         </div>
       )}
 
-      {customerImportProgress && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-sm rounded-lg border bg-card p-6 text-center shadow-xl">
-            <Loader2 size={32} className="mx-auto mb-4 animate-spin text-primary" />
-            <h2 className="text-lg font-bold">
-              {customerImportProgress.stage === 'validating' ? 'Validating customer upload' : 'Importing customers'}
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Please wait while we process <span className="font-medium text-foreground">{customerImportProgress.fileName}</span>.
-            </p>
-          </div>
-        </div>
-      )}
+      <CustomerImportModal
+        show={showCustomerImportModal}
+        onClose={closeCustomerImportModal}
+        previewRows={customerImportPreview}
+        summary={customerImportValidateSummary}
+        importing={customerImporting}
+        validating={validateCustomerImport.isPending}
+        onConfirm={handleCustomerImportConfirm}
+        onDownloadTemplate={() => downloadCustomerImportTemplate.mutate()}
+      />
 
       {customerImportSummary && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -748,8 +769,8 @@ export default function CustomersPage() {
                 <p className="text-xl font-bold text-green-600">{customerImportSummary.imported}</p>
               </div>
               <div className="rounded-md border p-3">
-                <span className="text-xs text-muted-foreground">Skipped duplicates</span>
-                <p className="text-xl font-bold text-orange-600">{customerImportSummary.skipped}</p>
+                <span className="text-xs text-muted-foreground">Warnings</span>
+                <p className="text-xl font-bold text-amber-600">{customerImportSummary.warnings}</p>
               </div>
               <div className="rounded-md border p-3">
                 <span className="text-xs text-muted-foreground">Invalid / failed</span>

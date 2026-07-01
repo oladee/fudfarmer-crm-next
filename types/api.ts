@@ -610,7 +610,7 @@ export interface CustomerImportPreviewRow {
 
 export interface CustomerImportValidateResponse {
   rows: CustomerImportPreviewRow[];
-  summary: { total: number; valid: number; invalid: number; skipped: number };
+  summary: { total: number; valid: number; invalid: number; warnings: number; skipped?: number };
 }
 
 export interface CustomerImportResult {

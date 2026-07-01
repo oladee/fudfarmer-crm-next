@@ -87,6 +87,7 @@ export function SalesImportModal({
               <p><strong>Historical (before today):</strong> amount required; product optional free text; no stock impact.</p>
             </>
           )}
+          <p className="mt-2">Each upload supports up to <strong>500 data rows</strong>. Re-download the template if dropdowns stop after row 501.</p>
         </div>
 
         {validating && previewRows.length === 0 && (
@@ -116,7 +117,7 @@ export function SalesImportModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {previewRows.slice(0, 50).map((row) => (
+                  {previewRows.map((row) => (
                     <tr
                       key={`import-row-${row.lineNo}`}
                       className={row.valid ? 'hover:bg-muted/30' : 'bg-orange-50/50'}
