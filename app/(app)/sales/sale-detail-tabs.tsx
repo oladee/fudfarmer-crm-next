@@ -142,7 +142,7 @@ function OverviewTab({
         <div className="flex items-center gap-2">
           <MapPin size={14} className="text-muted-foreground" />
           <span className="text-muted-foreground">Hub:</span>
-          {isEditing && hubScope.canSwitchHubs ? (
+          {isEditing && can('sales.edit') ? (
             <select
               value={editForm.hubName || sale.hubName || ''}
               onChange={(e) => setEditForm({ ...editForm, hubName: e.target.value })}

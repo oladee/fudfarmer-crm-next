@@ -61,6 +61,9 @@ export interface AddSaleModalProps {
   isHistoricalSale: boolean;
   productDetailsText: string;
   setProductDetailsText: (value: string) => void;
+  canCreateSale: boolean;
+  onCustomerSearchChange: (query: string) => void;
+  customersLoading?: boolean;
 }
 
 export function AddSaleModal({
@@ -100,6 +103,9 @@ export function AddSaleModal({
   isHistoricalSale,
   productDetailsText,
   setProductDetailsText,
+  canCreateSale,
+  onCustomerSearchChange,
+  customersLoading = false,
 }: Readonly<AddSaleModalProps>) {
   if (!show) return null;
 
@@ -115,7 +121,7 @@ export function AddSaleModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label htmlFor="sale-hub" className={LABEL_CLS}>Hub Location</label>
-              {hubScope.canSwitchHubs ? (
+              {canCreateSale ? (
                 <select id="sale-hub" value={selectedHub} onChange={(e) => { setSelectedHub(e.target.value); setSelectedProductId(''); }} className={INPUT_CLS}>
                   {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
                 </select>
@@ -152,6 +158,9 @@ export function AddSaleModal({
               id="sale-customer"
               customers={customers}
               value={newSale.customerId || ''}
+              serverSearch
+              onSearchChange={onCustomerSearchChange}
+              placeholder={customersLoading ? 'Searching customers...' : 'Search customers by name or hub...'}
               onChange={(customerId) => {
                 setNewSale({ ...newSale, customerId });
                 setTouched((t) => ({ ...t, customerId: true }));

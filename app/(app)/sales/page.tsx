@@ -73,7 +73,7 @@ export default function SalesPage() {
     user, can, isAdmin, hubScope,
     dateFrom, setDateFrom, dateTo, setDateTo, dateFieldFilter, setDateFieldFilter,
     quickPreset, setQuickPreset, applyPreset,
-    agents, customers, filteredSales, kpis, hasFilters, clearFilters,
+    agents, customers, customersFetching, setCustomerSearch, filteredSales, kpis, hasFilters, clearFilters,
     salesMeta, page, setPage, salesLoading, salesFetching, activeHubs,
     searchTerm, setSearchTerm, filterAgent, setFilterAgent, filterStatus, setFilterStatus,
     filterChannel, setFilterChannel,
@@ -398,6 +398,9 @@ export default function SalesPage() {
         isHistoricalSale={isHistoricalSale}
         productDetailsText={productDetailsText}
         setProductDetailsText={setProductDetailsText}
+        canCreateSale={can('sales.create')}
+        onCustomerSearchChange={setCustomerSearch}
+        customersLoading={customersFetching}
       />
 
       <SalesImportModal

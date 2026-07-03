@@ -53,6 +53,7 @@ export function customerMatchesSearch(customer: { name: string; email?: string; 
   );
 }
 
-export function customerOptionLabel(customer: { name: string; type?: string }): string {
+export function customerOptionLabel(customer: { name: string; type?: string; location?: string }): string {
+  if (customer.location) return `${customer.name} - ${customer.location}`;
   return customer.type ? `${customer.name} (${customer.type})` : customer.name;
 }

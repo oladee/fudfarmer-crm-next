@@ -14,6 +14,8 @@ export interface SearchableCustomerSelectProps {
   inputClassName?: string;
   id?: string;
   placeholder?: string;
+  serverSearch?: boolean;
+  onSearchChange?: (query: string) => void;
 }
 
 export function SearchableCustomerSelect({
@@ -24,6 +26,8 @@ export function SearchableCustomerSelect({
   inputClassName = '',
   id,
   placeholder = 'Search customers by name, email, or company...',
+  serverSearch = false,
+  onSearchChange,
 }: SearchableCustomerSelectProps) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -37,8 +41,8 @@ export function SearchableCustomerSelect({
   );
 
   const filteredCustomers = useMemo(
-    () => customers.filter((c) => customerMatchesSearch(c, query)),
-    [customers, query],
+    () => (serverSearch ? customers : customers.filter((c) => customerMatchesSearch(c, query))),
+    [customers, query, serverSearch],
   );
 
   useEffect(() => {
@@ -95,8 +99,10 @@ export function SearchableCustomerSelect({
           value={displayValue}
           placeholder={placeholder}
           onChange={(e) => {
-            setQuery(e.target.value);
+            const next = e.target.value;
+            setQuery(next);
             setOpen(true);
+            if (serverSearch) onSearchChange?.(next);
             if (value) onChange('');
           }}
           onFocus={() => {

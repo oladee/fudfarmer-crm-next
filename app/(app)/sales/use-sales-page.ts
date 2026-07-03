@@ -28,6 +28,7 @@ import {
   DeliveryStatus,
   PaymentType,
   PaymentMode,
+  Customer,
 } from '@/types';
 import { toast } from 'sonner';
 import {
@@ -118,10 +119,6 @@ export function useSalesPage() {
     filterChannel,
   ]);
 
-  const { data: customerList } = useCustomers();
-  const customers = customerList?.items ?? [];
-  const { data: agents = [] } = useAgents();
-  const { data: inventory = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
   const { data: stockLogs = [] } = useStockLogs();
   const { data: creditSummary = [] } = useCreditSummary();
   const { data: hubs = [] } = useHubs();
@@ -136,6 +133,9 @@ export function useSalesPage() {
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [debouncedCustomerSearch, setDebouncedCustomerSearch] = useState('');
+  const [pinnedSaleCustomer, setPinnedSaleCustomer] = useState<Customer | null>(null);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedHub, setSelectedHub] = useState<string>(hubScope.defaultHubName || 'Lagos');
   useEffect(() => {
@@ -173,10 +173,50 @@ export function useSalesPage() {
   const [importSummary, setImportSummary] = useState<{ total: number; valid: number; invalid: number } | null>(null);
   const [importing, setImporting] = useState(false);
 
-  const availableInventory = useMemo(
-    () => inventory.filter((i) => i.location === selectedHub),
-    [inventory, selectedHub],
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedCustomerSearch(customerSearch.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [customerSearch]);
+
+  const resolveHubId = useCallback(
+    (hubName: string) => {
+      const hub = activeHubs.find((h) => h.name === hubName) ?? hubs.find((h) => h.name === hubName);
+      return hub?.id;
+    },
+    [activeHubs, hubs],
   );
+
+  const selectedHubId = useMemo(() => resolveHubId(selectedHub), [resolveHubId, selectedHub]);
+
+  const { data: customerList, isFetching: customersFetching } = useCustomers(
+    { search: debouncedCustomerSearch || undefined, limit: 50 },
+    { enabled: showAddModal },
+  );
+
+  const saleModalCustomers = useMemo(() => {
+    const items = customerList?.items ?? [];
+    if (pinnedSaleCustomer && !items.some((c) => c.id === pinnedSaleCustomer.id)) {
+      return [pinnedSaleCustomer, ...items];
+    }
+    return items;
+  }, [customerList, pinnedSaleCustomer]);
+
+  useEffect(() => {
+    if (!newSale.customerId) {
+      setPinnedSaleCustomer(null);
+      return;
+    }
+    const found = saleModalCustomers.find((c) => c.id === newSale.customerId);
+    if (found) setPinnedSaleCustomer(found);
+  }, [newSale.customerId, saleModalCustomers]);
+
+  const { data: agents = [] } = useAgents();
+  const { data: inventory = [] } = useInventory(
+    selectedHubId ? { hub_id: selectedHubId } : undefined,
+    { enabled: showAddModal && !!selectedHubId },
+  );
+
+  const availableInventory = inventory;
   const selectedInventoryItem = useMemo(
     () => inventory.find((i) => i.id === selectedProductId),
     [inventory, selectedProductId],
@@ -230,7 +270,7 @@ export function useSalesPage() {
 
   const selectedFormCustomer = useMemo(() => {
     if (!newSale.customerId) return null;
-    const c = customers.find((cu) => cu.id === newSale.customerId);
+    const c = saleModalCustomers.find((cu) => cu.id === newSale.customerId);
     if (!c) return null;
     const custSales = sales.filter((s) => s.customerId === c.id && s.status !== 'Voided');
     const avgOrder =
@@ -239,7 +279,7 @@ export function useSalesPage() {
     const lastSale = sorted.length > 0 ? sorted[0]?.date : null;
     const credit = creditSummary.find((cr) => cr.customerId === c.id);
     return { ...c, avgOrder, lastSale, credit };
-  }, [newSale.customerId, customers, sales, creditSummary]);
+  }, [newSale.customerId, saleModalCustomers, sales, creditSummary]);
 
   const applyPreset = (preset: QuickDatePreset) => {
     setQuickPreset(preset);
@@ -247,14 +287,6 @@ export function useSalesPage() {
     setDateFrom(from);
     setDateTo(to);
   };
-
-  const resolveHubId = useCallback(
-    (hubName: string) => {
-      const hub = activeHubs.find((h) => h.name === hubName) ?? hubs.find((h) => h.name === hubName);
-      return hub?.id;
-    },
-    [activeHubs, hubs],
-  );
 
   const filteredSales = sales;
 
@@ -328,6 +360,9 @@ export function useSalesPage() {
     setDueDate(d.toISOString().split('T')[0]);
     setTouched({});
     setProductDetailsText('');
+    setCustomerSearch('');
+    setDebouncedCustomerSearch('');
+    setPinnedSaleCustomer(null);
   };
 
   const handleSaveSale = () => {
@@ -616,7 +651,9 @@ export function useSalesPage() {
     salesFetching,
     page,
     setPage,
-    customers,
+    customers: saleModalCustomers,
+    customersFetching,
+    setCustomerSearch,
     agents,
     inventory,
     filteredSales,

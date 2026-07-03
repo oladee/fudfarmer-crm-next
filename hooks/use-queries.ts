@@ -566,10 +566,11 @@ export function useCustomers(filters?: {
   hub_id?: string;
   page?: number;
   limit?: number;
-}) {
+}, options?: { enabled?: boolean }) {
   const qc = useQueryClient();
   return useQuery({
     queryKey: ['customers', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async (): Promise<CustomerListResult> => {
       if (!HAS_API) return EMPTY_CUSTOMER_LIST;
       const hubs = await qc.fetchQuery({
@@ -971,9 +972,10 @@ export function useImportInventory() {
 }
 
 // --- Inventory ---
-export function useInventory(filters?: { hub_id?: string; category?: string; low_stock?: boolean; search?: string }) {
+export function useInventory(filters?: { hub_id?: string; category?: string; low_stock?: boolean; search?: string }, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['inventory', filters],
+    enabled: options?.enabled ?? true,
     queryFn: async () => {
       if (!HAS_API) return [];
       const hubMap = await fetchHubMap();
