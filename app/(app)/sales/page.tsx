@@ -8,7 +8,7 @@ import {
   ArrowUpRight, ArrowDownRight, Calendar, Upload, Download, ShoppingCart, Truck, BarChart3,
 } from 'lucide-react';
 import {
-  fmt, paymentModeBadgeClass, paymentModeLabel, resolveSalePaymentMode, saleCountLabel,
+  fmt, paymentModeBadgeClass, paymentModeLabel, resolveSalePaymentMode,
   type QuickDatePreset, type SaleDateFieldFilter,
 } from './sales-utils';
 import { useSalesPage } from './use-sales-page';
@@ -74,6 +74,7 @@ export default function SalesPage() {
     dateFrom, setDateFrom, dateTo, setDateTo, dateFieldFilter, setDateFieldFilter,
     quickPreset, setQuickPreset, applyPreset,
     agents, customers, filteredSales, kpis, hasFilters, clearFilters,
+    salesMeta, page, setPage, salesLoading, salesFetching, activeHubs,
     searchTerm, setSearchTerm, filterAgent, setFilterAgent, filterStatus, setFilterStatus,
     filterChannel, setFilterChannel,
     selectedSale, setSelectedSale, detailTab, setDetailTab, isEditing, setIsEditing,
@@ -109,7 +110,7 @@ export default function SalesPage() {
 
   const kpiCards = [
     { label: 'Revenue', value: fmt(kpis.revenue), change: kpis.revenueChange, icon: <Banknote size={14} />, color: 'text-green-600' },
-    ...(isAdmin ? [{ label: 'Profit', value: fmt(kpis.profit), change: kpis.profitChange, icon: <TrendingUp size={14} />, color: 'text-blue-600' }] : []),
+    ...(isAdmin ? [{ label: 'Profit', value: fmt(kpis.profit ?? 0), change: kpis.profitChange, icon: <TrendingUp size={14} />, color: 'text-blue-600' }] : []),
     { label: 'Total Sales', value: String(kpis.count), icon: <ShoppingCart size={14} />, color: 'text-primary' },
     { label: 'Avg. Order', value: fmt(Math.round(kpis.avgOrder)), icon: <BarChart3 size={14} />, color: 'text-purple-600' },
     { label: 'Credit Sales', value: `${kpis.creditCount} (${fmt(kpis.creditAmount)})`, icon: <CreditCard size={14} />, color: 'text-orange-600' },
@@ -267,7 +268,11 @@ export default function SalesPage() {
             </button>
           )}
         </div>
-        <span className="text-xs text-muted-foreground whitespace-nowrap sm:ml-auto">{saleCountLabel(filteredSales.length)}</span>
+        <span className="text-xs text-muted-foreground whitespace-nowrap sm:ml-auto">
+          {salesMeta.total === 0
+            ? 'No sales to show'
+            : `Showing ${(salesMeta.page - 1) * salesMeta.limit + 1}–${Math.min(salesMeta.page * salesMeta.limit, salesMeta.total)} of ${salesMeta.total}`}
+        </span>
       </div>
 
       <div className="rounded-md border bg-card overflow-hidden">
@@ -289,11 +294,42 @@ export default function SalesPage() {
               {filteredSales.map((sale) => (
                 <SalesTableRow key={sale.id} sale={sale} onSelect={openSaleDetail} />
               ))}
-              {filteredSales.length === 0 && (
+              {filteredSales.length === 0 && !salesLoading && (
                 <tr><td colSpan={8} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>
+              )}
+              {salesLoading && (
+                <tr><td colSpan={8} className="p-12 text-center text-muted-foreground italic">Loading sales...</td></tr>
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {salesMeta.total === 0
+              ? 'No sales to show'
+              : `Page ${salesMeta.page} of ${salesMeta.totalPages}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={salesMeta.page <= 1 || salesLoading || salesFetching}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="text-sm text-muted-foreground px-2">
+              Page {salesMeta.page} of {salesMeta.totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={salesMeta.page >= salesMeta.totalPages || salesLoading || salesFetching}
+              onClick={() => setPage((p) => p + 1)}
+              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -320,6 +356,8 @@ export default function SalesPage() {
           voidingSale={voidingSale}
           updatingDelivery={updatingDelivery}
           can={can}
+          hubScope={hubScope}
+          activeHubs={activeHubs}
         />
       )}
 

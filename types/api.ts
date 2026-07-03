@@ -182,6 +182,7 @@ export interface ApiSale {
   agent: string;
   agent_name: string;
   hub?: string;
+  hub_name?: string;
   status: string;
   product_details?: string;
   payment_terms?: string;

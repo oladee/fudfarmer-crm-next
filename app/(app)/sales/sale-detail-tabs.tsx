@@ -8,11 +8,14 @@ import { Sale, PaymentTerms, SalesChannel, DeliveryStatus, PaymentMode } from '@
 import type { StockLog } from '@/types';
 import type { Permission } from '@/lib/permissions';
 import {
-  fmt, statusColor, paymentModeBadgeClass, extractHub, DELIVERY_STEPS,
+  fmt, statusColor, paymentModeBadgeClass, DELIVERY_STEPS,
   INPUT_CLS, BTN_PRIMARY, BTN_SECONDARY,
 } from './sales-utils';
 import type { DetailTab } from './sales-utils';
 import { SubmitButton } from '@/components/submit-button';
+
+import type { HubScopeFilter } from '@/hooks/use-hub-scope';
+import type { Hub } from '@/types';
 
 export type SaleDetailTabProps = Readonly<{
   sale: Sale;
@@ -29,6 +32,8 @@ export type SaleDetailTabProps = Readonly<{
   voidingSale?: boolean;
   updatingDelivery?: boolean;
   can: (permission: Permission) => boolean;
+  hubScope: HubScopeFilter;
+  activeHubs: Hub[];
 }>;
 
 function DeliveryAdvanceButton({
@@ -67,7 +72,7 @@ function DeliveryAdvanceButton({
 
 function OverviewTab({
   sale, isEditing, editForm, setEditForm, showVoidConfirm, setShowVoidConfirm,
-  saleStockLogs, onVoidSale, voidingSale = false, can,
+  saleStockLogs, onVoidSale, voidingSale = false, can, hubScope, activeHubs,
 }: SaleDetailTabProps) {
   return (
     <>
@@ -137,7 +142,19 @@ function OverviewTab({
         <div className="flex items-center gap-2">
           <MapPin size={14} className="text-muted-foreground" />
           <span className="text-muted-foreground">Hub:</span>
-          <span className="font-medium">{extractHub(sale.productDetails) || '—'}</span>
+          {isEditing && hubScope.canSwitchHubs ? (
+            <select
+              value={editForm.hubName || sale.hubName || ''}
+              onChange={(e) => setEditForm({ ...editForm, hubName: e.target.value })}
+              className="h-8 rounded-md border px-2 text-sm bg-background"
+            >
+              {activeHubs.map((h) => (
+                <option key={h.id} value={h.name}>{h.name}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="font-medium">{sale.hubName || '—'}</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <ShoppingCart size={14} className="text-muted-foreground" />

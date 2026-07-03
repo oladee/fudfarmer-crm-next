@@ -75,6 +75,10 @@ import {
   FeedbackPriority,
   CustomerListResult,
   CustomerListSummary,
+  SalesListResult,
+  SalesListSummary,
+  AuditLogListResult,
+  AuditLogListSummary,
 } from '../types';
 
 
@@ -91,6 +95,124 @@ type UseQueryEnabledOptions = { enabled?: boolean };
 
 const HUBS_STALE_MS = 5 * 60 * 1000;
 const CUSTOMERS_PAGE_SIZE = 20;
+export const SALES_PAGE_SIZE = 25;
+const AUDIT_PAGE_SIZE = 25;
+
+const EMPTY_SALES_LIST: SalesListResult = {
+  items: [],
+  meta: { page: 1, limit: SALES_PAGE_SIZE, total: 0, totalPages: 1 },
+  summary: {
+    revenue: 0,
+    profit: 0,
+    count: 0,
+    avgOrder: 0,
+    creditCount: 0,
+    creditAmount: 0,
+    deliveryCount: 0,
+    revenueChange: 0,
+    profitChange: 0,
+  },
+};
+
+const EMPTY_AUDIT_LIST: AuditLogListResult = {
+  items: [],
+  meta: { page: 1, limit: AUDIT_PAGE_SIZE, total: 0, totalPages: 1 },
+  summary: { total: 0, bulk: 0, sales: 0, inventory: 0, customers: 0 },
+};
+
+function defaultSalesSummary(): SalesListSummary {
+  return EMPTY_SALES_LIST.summary;
+}
+
+function defaultAuditSummary(): AuditLogListSummary {
+  return EMPTY_AUDIT_LIST.summary;
+}
+
+function parseSalesListResponse(
+  raw: unknown,
+  hubMap: Record<string, string>,
+): SalesListResult {
+  let body: unknown = raw;
+  if (
+    body &&
+    typeof body === 'object' &&
+    'message' in body &&
+    'data' in body &&
+    !('items' in body)
+  ) {
+    body = (body as ApiListResponse<{ items: ApiSale[]; pagination?: SalesListResult['meta']; summary?: SalesListSummary }>).data;
+  }
+
+  if (body && typeof body === 'object' && 'items' in body) {
+    const data = body as {
+      items?: ApiSale[];
+      pagination?: Partial<SalesListResult['meta']>;
+      summary?: Partial<SalesListSummary>;
+    };
+    const page = data.pagination?.page ?? 1;
+    const limit = data.pagination?.limit ?? SALES_PAGE_SIZE;
+    const total = data.pagination?.total ?? 0;
+    const totalPages = data.pagination?.totalPages ?? Math.max(1, Math.ceil(total / limit));
+    return {
+      items: (data.items ?? []).map((s) => mapSale(s, hubMap)),
+      meta: { page, limit, total, totalPages },
+      summary: { ...defaultSalesSummary(), ...(data.summary ?? {}) },
+    };
+  }
+
+  if (Array.isArray(body)) {
+    return {
+      items: body.map((s) => mapSale(s as ApiSale, hubMap)),
+      meta: { page: 1, limit: body.length, total: body.length, totalPages: 1 },
+      summary: defaultSalesSummary(),
+    };
+  }
+
+  return EMPTY_SALES_LIST;
+}
+
+function parseAuditListResponse(
+  raw: unknown,
+  hubMap: Record<string, string>,
+): AuditLogListResult {
+  let body: unknown = raw;
+  if (
+    body &&
+    typeof body === 'object' &&
+    'message' in body &&
+    'data' in body &&
+    !('items' in body)
+  ) {
+    body = (body as ApiListResponse<{ items: ApiAuditLog[]; pagination?: AuditLogListResult['meta']; summary?: AuditLogListSummary }>).data;
+  }
+
+  if (body && typeof body === 'object' && 'items' in body) {
+    const data = body as {
+      items?: ApiAuditLog[];
+      pagination?: Partial<AuditLogListResult['meta']>;
+      summary?: Partial<AuditLogListSummary>;
+    };
+    const page = data.pagination?.page ?? 1;
+    const limit = data.pagination?.limit ?? AUDIT_PAGE_SIZE;
+    const total = data.pagination?.total ?? 0;
+    const totalPages = data.pagination?.totalPages ?? Math.max(1, Math.ceil(total / limit));
+    return {
+      items: (data.items ?? []).map((l) => mapAuditLog(l, hubMap)),
+      meta: { page, limit, total, totalPages },
+      summary: { ...defaultAuditSummary(), ...(data.summary ?? {}) },
+    };
+  }
+
+  if (Array.isArray(body)) {
+    return {
+      items: body.map((l) => mapAuditLog(l as ApiAuditLog, hubMap)),
+      meta: { page: 1, limit: body.length, total: body.length, totalPages: 1 },
+      summary: defaultAuditSummary(),
+    };
+  }
+
+  return EMPTY_AUDIT_LIST;
+}
 
 const EMPTY_CUSTOMER_LIST: CustomerListResult = {
   items: [],
@@ -610,16 +732,44 @@ export function useDeleteSegment() {
 
 // --- Sales ---
 export function useSales(
-  filters?: { status?: string; date_from?: string; date_to?: string; date_field?: string; payment_mode?: string; hub_id?: string },
+  filters?: {
+    status?: string;
+    date_from?: string;
+    date_to?: string;
+    date_field?: string;
+    payment_mode?: string;
+    hub_id?: string;
+    agent_id?: string;
+    channel?: string;
+    search?: string;
+    exclude_voided?: boolean;
+    page?: number;
+    limit?: number;
+  },
   options?: UseQueryEnabledOptions,
 ) {
   return useQuery({
     queryKey: ['sales', filters],
     enabled: options?.enabled ?? true,
-    queryFn: async () => {
-      if (!HAS_API) return [];
-      const res = await axiosGet(`sales${buildQuery(filters ?? {})}`, true) as ApiListResponse<{ items: ApiSale[] }>;
-      return (res.data?.items ?? []).map(mapSale);
+    queryFn: async (): Promise<SalesListResult> => {
+      if (!HAS_API) return EMPTY_SALES_LIST;
+      const hubMap = await fetchHubMap();
+      const params: Record<string, string | number | boolean | undefined> = {
+        status: filters?.status,
+        date_from: filters?.date_from,
+        date_to: filters?.date_to,
+        date_field: filters?.date_field,
+        payment_mode: filters?.payment_mode,
+        hub_id: filters?.hub_id,
+        agent_id: filters?.agent_id,
+        channel: filters?.channel,
+        search: filters?.search,
+        exclude_voided: filters?.exclude_voided,
+        page: filters?.page,
+        limit: filters?.limit,
+      };
+      const raw = await axiosGet(`sales${buildQuery(params)}`, true);
+      return parseSalesListResponse(raw, hubMap);
     },
   });
 }
@@ -668,7 +818,8 @@ export function useUpdateSale() {
   return useMutation({
     mutationFn: async ({ id, ...dto }: { id: string; [key: string]: unknown }) => {
       const res = await axiosPatch(`sales/${id}`, dto, true) as ApiListResponse<ApiSale>;
-      return mapSale(res.data);
+      const hubMap = await fetchHubMap();
+      return mapSale(res.data, hubMap);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
   });
@@ -1257,11 +1408,23 @@ export function useAuditLogs(filters?: {
 }) {
   return useQuery({
     queryKey: ['auditLogs', filters],
-    queryFn: async () => {
-      if (!HAS_API) return [];
+    queryFn: async (): Promise<AuditLogListResult> => {
+      if (!HAS_API) return EMPTY_AUDIT_LIST;
       const hubMap = await fetchHubMap();
-      const res = await axiosGet(`audit-trail${buildQuery(filters ?? {})}`, true) as ApiListResponse<{ items: ApiAuditLog[] }>;
-      return (res.data?.items ?? []).map((l) => mapAuditLog(l, hubMap));
+      const params: Record<string, string | number | undefined> = {
+        entity_type: filters?.entity_type,
+        user_id: filters?.user_id,
+        date_from: filters?.date_from,
+        date_to: filters?.date_to,
+        search: filters?.search,
+        category: filters?.category,
+        bulk_domain: filters?.bulk_domain,
+        import_type: filters?.import_type,
+        page: filters?.page,
+        limit: filters?.limit,
+      };
+      const raw = await axiosGet(`audit-trail${buildQuery(params)}`, true);
+      return parseAuditListResponse(raw, hubMap);
     },
   });
 }
@@ -1340,7 +1503,7 @@ export function useDashboardMetrics(): ReturnType<typeof useQuery<DashboardMetri
       const enquiryList: ApiEnquiry[] = Array.isArray(enquiryRaw) ? enquiryRaw : (enquiryRaw as ApiListResponse<ApiEnquiry[]>).data ?? [];
       const customerList = parseCustomerListResponse(customerRaw);
       const customers = customerList.data.map((c) => mapCustomer(c, hubMap));
-      const sales = (salesRes.data?.items ?? []).map(mapSale);
+      const sales = (salesRes.data?.items ?? []).map((s) => mapSale(s, hubMap));
 
       return normalizeDashboardMetrics(metricsRaw, {
         creditSummary: creditSummaryRes.data,

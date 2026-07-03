@@ -19,6 +19,7 @@ import {
   useDownloadSalesImportTemplate,
   useValidateSalesImport,
   useImportSales,
+  SALES_PAGE_SIZE,
 } from '@/hooks/use-queries';
 import {
   Sale,
@@ -34,8 +35,6 @@ import {
   getDateRange,
   creditWarningText,
   escapeCsvCell,
-  matchesSaleFilters,
-  computeSalesKpis,
   getAmountPaidForMode,
   BTN_PRIMARY,
   BTN_SECONDARY,
@@ -57,17 +56,68 @@ export function useSalesPage() {
   const [dateFieldFilter, setDateFieldFilter] = useState<SaleDateFieldFilter>('sold');
   const [quickPreset, setQuickPreset] = useState<QuickDatePreset>('all');
 
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterAgent, setFilterAgent] = useState('All');
+  const [filterStatus, setFilterStatus] = useState('All');
+  const [filterChannel, setFilterChannel] = useState<string>('All');
+  const [page, setPage] = useState(1);
+
   const salesApiFilters = useMemo(
     () => ({
       hub_id: hubScope.hubIdForApi,
       ...(dateFrom ? { date_from: dateFrom } : {}),
       ...(dateTo ? { date_to: dateTo } : {}),
       ...(dateFrom || dateTo ? { date_field: dateFieldFilter } : {}),
+      ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}),
+      ...(filterAgent !== 'All' ? { agent_id: filterAgent } : {}),
+      ...(filterStatus === 'All'
+        ? { exclude_voided: true }
+        : { status: filterStatus }),
+      ...(filterChannel !== 'All' ? { channel: filterChannel } : {}),
+      page,
+      limit: SALES_PAGE_SIZE,
     }),
-    [hubScope.hubIdForApi, dateFrom, dateTo, dateFieldFilter],
+    [
+      hubScope.hubIdForApi,
+      dateFrom,
+      dateTo,
+      dateFieldFilter,
+      searchTerm,
+      filterAgent,
+      filterStatus,
+      filterChannel,
+      page,
+    ],
   );
 
-  const { data: sales = [] } = useSales(salesApiFilters);
+  const { data: salesList, isLoading: salesLoading, isFetching: salesFetching } = useSales(salesApiFilters);
+  const sales = salesList?.items ?? [];
+  const salesMeta = salesList?.meta ?? { page: 1, limit: SALES_PAGE_SIZE, total: 0, totalPages: 1 };
+  const kpis = salesList?.summary ?? {
+    revenue: 0,
+    profit: 0,
+    count: 0,
+    avgOrder: 0,
+    creditCount: 0,
+    creditAmount: 0,
+    deliveryCount: 0,
+    revenueChange: 0,
+    profitChange: 0,
+  };
+
+  useEffect(() => {
+    setPage(1);
+  }, [
+    hubScope.hubIdForApi,
+    dateFrom,
+    dateTo,
+    dateFieldFilter,
+    searchTerm,
+    filterAgent,
+    filterStatus,
+    filterChannel,
+  ]);
+
   const { data: customerList } = useCustomers();
   const customers = customerList?.items ?? [];
   const { data: agents = [] } = useAgents();
@@ -84,11 +134,6 @@ export function useSalesPage() {
   const validateImport = useValidateSalesImport();
   const importSales = useImportSales();
   const importInputRef = useRef<HTMLInputElement>(null);
-
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterAgent, setFilterAgent] = useState('All');
-  const [filterStatus, setFilterStatus] = useState('All');
-  const [filterChannel, setFilterChannel] = useState<string>('All');
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -211,19 +256,7 @@ export function useSalesPage() {
     [activeHubs, hubs],
   );
 
-  const filteredSales = useMemo(
-    () =>
-      sales.filter((s) =>
-        matchesSaleFilters(s, {
-          searchTerm,
-          filterAgent,
-          filterStatus,
-          filterChannel,
-          hubMatches: (hubName) => hubScope.matchesHub(hubName),
-        }),
-      ),
-    [sales, searchTerm, filterAgent, filterStatus, hubScope, filterChannel],
-  );
+  const filteredSales = sales;
 
   const hasFilters =
     searchTerm ||
@@ -245,14 +278,8 @@ export function useSalesPage() {
     setDateTo('');
     setDateFieldFilter('sold');
     setQuickPreset('all');
+    setPage(1);
   };
-
-  const activeSales = useMemo(() => sales.filter((s) => s.status !== 'Voided'), [sales]);
-
-  const kpis = useMemo(
-    () => computeSalesKpis(filteredSales, activeSales),
-    [filteredSales, activeSales],
-  );
 
   const handleProductChange = (productId: string) => {
     setSelectedProductId(productId);
@@ -400,6 +427,7 @@ export function useSalesPage() {
       customerPhone: selectedSale.customerPhone,
       paymentTerms: selectedSale.paymentTerms,
       channel: selectedSale.channel,
+      hubName: selectedSale.hubName,
     });
     setIsEditing(true);
   };
@@ -409,6 +437,7 @@ export function useSalesPage() {
     const amount = Number(editForm.amount) || selectedSale.amount;
     const profitMargin = isAdmin ? Number(editForm.profitMargin) || selectedSale.profitMargin : 0;
     const profitAmount = isAdmin ? (amount * profitMargin) / 100 : 0;
+    const hubId = editForm.hubName ? resolveHubId(editForm.hubName) : undefined;
     updateSale.mutate(
       {
         id: selectedSale.id,
@@ -418,6 +447,7 @@ export function useSalesPage() {
         delivery_address: editForm.deliveryAddress,
         payment_terms: editForm.paymentTerms,
         channel: editForm.channel,
+        ...(hubId && hubId !== selectedSale.hubId ? { hub_id: hubId } : {}),
       },
       {
         onSuccess: (updated) => {
@@ -581,12 +611,17 @@ export function useSalesPage() {
     applyPreset,
     salesApiFilters,
     sales,
+    salesMeta,
+    salesLoading,
+    salesFetching,
+    page,
+    setPage,
     customers,
     agents,
     inventory,
     filteredSales,
     kpis,
-    activeSales,
+    activeHubs,
     hasFilters,
     clearFilters,
     selectedSale,

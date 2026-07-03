@@ -123,7 +123,8 @@ export default function CustomersPage() {
   const kpis = customerList?.summary ?? { total: 0, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 };
   const { data: agents = [] } = useAgents(undefined, { enabled: showAddModal });
   const detailDataEnabled = !!selectedCustomer;
-  const { data: sales = [] } = useSales(undefined, { enabled: detailDataEnabled });
+  const { data: salesList } = useSales(undefined, { enabled: detailDataEnabled });
+  const sales = salesList?.items ?? [];
   const { data: feedback = [] } = useFeedback(undefined, { enabled: detailDataEnabled });
   const { data: enquiries = [] } = useEnquiries(undefined, { enabled: detailDataEnabled });
   const { data: compensations = [] } = useCompensations(undefined, { enabled: detailDataEnabled });

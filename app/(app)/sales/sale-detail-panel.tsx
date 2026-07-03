@@ -1,7 +1,8 @@
 'use client';
 
 import { X, Edit3, Save } from 'lucide-react';
-import { Sale, DeliveryStatus } from '@/types';
+import { Sale, DeliveryStatus, Hub } from '@/types';
+import type { HubScopeFilter } from '@/hooks/use-hub-scope';
 import { statusColor } from './sales-utils';
 import type { DetailTab } from './sales-utils';
 import type { Permission } from '@/lib/permissions';
@@ -32,6 +33,8 @@ export type SaleDetailPanelProps = Readonly<{
   voidingSale?: boolean;
   updatingDelivery?: boolean;
   can: (permission: Permission) => boolean;
+  hubScope: HubScopeFilter;
+  activeHubs: Hub[];
 }>;
 
 function DetailPanelHeader({
@@ -101,6 +104,8 @@ export function SaleDetailPanel({
   voidingSale = false,
   updatingDelivery = false,
   can,
+  hubScope,
+  activeHubs,
 }: SaleDetailPanelProps) {
   return (
     <ModalDialog onClose={onClose} align="end">
@@ -148,6 +153,8 @@ export function SaleDetailPanel({
             voidingSale={voidingSale}
             updatingDelivery={updatingDelivery}
             can={can}
+            hubScope={hubScope}
+            activeHubs={activeHubs}
           />
         </div>
       </div>

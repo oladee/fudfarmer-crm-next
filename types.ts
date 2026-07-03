@@ -282,6 +282,38 @@ export interface CustomerListResult {
   summary: CustomerListSummary;
 }
 
+export interface SalesListSummary {
+  revenue: number;
+  profit?: number;
+  count: number;
+  avgOrder: number;
+  creditCount: number;
+  creditAmount: number;
+  deliveryCount: number;
+  revenueChange: number;
+  profitChange: number;
+}
+
+export interface SalesListResult {
+  items: Sale[];
+  meta: { page: number; limit: number; total: number; totalPages: number };
+  summary: SalesListSummary;
+}
+
+export interface AuditLogListSummary {
+  total: number;
+  bulk: number;
+  sales: number;
+  inventory: number;
+  customers: number;
+}
+
+export interface AuditLogListResult {
+  items: AuditLog[];
+  meta: { page: number; limit: number; total: number; totalPages: number };
+  summary: AuditLogListSummary;
+}
+
 
 export interface Sale {
   id: string;
@@ -295,6 +327,8 @@ export interface Sale {
   updatedAt?: string;
   agentId: string;
   agentName: string;
+  hubId?: string;
+  hubName?: string;
   status: 'Pending' | 'Approved' | 'Paid' | 'Voided';
   productDetails?: string;
   isCredit?: boolean;

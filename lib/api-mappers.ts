@@ -159,7 +159,7 @@ export function mapCustomer(c: ApiCustomer, hubMap?: Record<string, string>): Cu
   };
 }
 
-export function mapSale(s: ApiSale): Sale {
+export function mapSale(s: ApiSale, hubMap?: Record<string, string>): Sale {
   const paymentMode = s.payment_mode || 'Full Payment';
   return {
     id: s.id || s._id || '',
@@ -173,6 +173,8 @@ export function mapSale(s: ApiSale): Sale {
     updatedAt: toDateStr(s.updatedAt),
     agentId: refId(s.agent),
     agentName: s.agent_name,
+    hubId: refId(s.hub),
+    hubName: s.hub_name ?? (s.hub ? resolveHubName(s.hub, hubMap) : ''),
     status: s.status as Sale['status'],
     productDetails: s.product_details,
     isCredit: paymentMode !== 'Full Payment',
