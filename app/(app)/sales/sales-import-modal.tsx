@@ -1,7 +1,7 @@
 'use client';
 
 import { Upload, X, Check, AlertCircle, Download, Loader2 } from 'lucide-react';
-import type { SalesImportPreviewRow } from '@/types/api';
+import type { SalesImportChunkResult, SalesImportPreviewRow } from '@/types/api';
 import { fmt, BTN_PRIMARY, BTN_SECONDARY } from '../sales/sales-utils';
 import { ModalDialog } from '../sales/modal-dialog';
 
@@ -12,7 +12,11 @@ export interface SalesImportModalProps {
   summary: { total: number; valid: number; invalid: number } | null;
   importing: boolean;
   validating: boolean;
+  showImportConfirm: boolean;
+  importProgress: { processed: number; total: number; imported: number; failed: number } | null;
+  importResult: SalesImportChunkResult | null;
   onConfirm: () => void;
+  onCancelConfirm: () => void;
   onDownloadTemplate: (type?: 'catalog' | 'custom') => void;
 }
 
@@ -23,7 +27,11 @@ export function SalesImportModal({
   summary,
   importing,
   validating,
+  showImportConfirm,
+  importProgress,
+  importResult,
   onConfirm,
+  onCancelConfirm,
   onDownloadTemplate,
 }: Readonly<SalesImportModalProps>) {
   if (!show) return null;
@@ -40,12 +48,21 @@ export function SalesImportModal({
   }
 
   const saleLabel = validRows.length === 1 ? 'Sale' : 'Sales';
-  const importButtonLabel = importing
-    ? 'Importing…'
-    : `Import ${validRows.length} ${saleLabel}`;
+  const progressPct = importProgress && importProgress.total > 0
+    ? Math.min(100, Math.round((importProgress.processed / importProgress.total) * 100))
+    : 0;
+
+  const failedResults = (importResult?.results ?? []).filter((r) => !r.success);
+
+  let importButtonLabel = `Import ${validRows.length} ${saleLabel}`;
+  if (showImportConfirm && !importing) {
+    importButtonLabel = `Yes, import ${validRows.length} ${saleLabel}`;
+  } else if (importing) {
+    importButtonLabel = `Importing ${importProgress?.processed ?? 0} / ${importProgress?.total ?? validRows.length}…`;
+  }
 
   return (
-    <ModalDialog onClose={onClose}>
+    <ModalDialog onClose={importing ? () => {} : onClose}>
       <div className="relative z-10 w-full max-w-4xl rounded-md border bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <div>
@@ -54,10 +71,64 @@ export function SalesImportModal({
             </h2>
             <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
           </div>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={importing}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
             <X size={20} />
           </button>
         </div>
+
+        {showImportConfirm && !importing && (
+          <div className="mb-4 p-4 rounded-md border border-primary/30 bg-primary/5 text-sm">
+            <p className="font-semibold text-foreground">
+              Import {validRows.length} sale{validRows.length === 1 ? '' : 's'} from this file?
+            </p>
+            <p className="text-muted-foreground mt-1">
+              Large files are imported in batches of 50 so no rows are skipped. This may take a few minutes.
+            </p>
+          </div>
+        )}
+
+        {importing && importProgress && (
+          <div className="mb-4 p-4 rounded-md border bg-muted/20">
+            <div className="flex justify-between text-sm mb-2">
+              <span className="font-medium">Importing sales…</span>
+              <span className="text-muted-foreground">
+                {importProgress.processed} / {importProgress.total}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              {importProgress.imported} imported, {importProgress.failed} failed so far
+            </p>
+          </div>
+        )}
+
+        {importResult && failedResults.length > 0 && (
+          <div className="mb-4 p-3 rounded-md border border-orange-300 bg-orange-50 text-sm">
+            <p className="font-medium text-orange-800 mb-2">
+              {importResult.failed_so_far} row(s) failed to import
+            </p>
+            <div className="max-h-32 overflow-y-auto space-y-1 text-xs text-orange-800">
+              {failedResults.slice(0, 20).map((r) => (
+                <p key={`fail-${r.lineNo}`}>
+                  Row {r.lineNo}: {r.error ?? 'Unknown error'}
+                </p>
+              ))}
+              {failedResults.length > 20 && (
+                <p className="italic">…and {failedResults.length - 20} more</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {hasInvalid && (
           <div className="mb-4 p-3 rounded-md border border-orange-300 bg-orange-50 text-sm">
@@ -172,7 +243,15 @@ export function SalesImportModal({
         )}
 
         <div className="flex justify-end gap-3">
-          <button type="button" onClick={onClose} className={BTN_SECONDARY}>Cancel</button>
+          {showImportConfirm && !importing ? (
+            <button type="button" onClick={onCancelConfirm} className={BTN_SECONDARY}>
+              Back
+            </button>
+          ) : (
+            <button type="button" onClick={onClose} disabled={importing} className={BTN_SECONDARY}>
+              Cancel
+            </button>
+          )}
           <button
             type="button"
             onClick={onConfirm}

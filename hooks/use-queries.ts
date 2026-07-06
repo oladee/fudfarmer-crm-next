@@ -33,6 +33,7 @@ import {
   ApiBulkImportSaleRow,
   SalesImportValidateResponse,
   SalesImportResult,
+  SalesImportChunkResult,
   ApiBulkImportMovementRow,
   InventoryImportValidateResponse,
   InventoryImportResult,
@@ -921,6 +922,54 @@ export function useImportSales() {
     },
     onSuccess: () => invalidateSalesImportQueries(qc),
   });
+}
+
+export const SALES_IMPORT_CHUNK_SIZE = 50;
+
+export async function confirmSalesImportChunk(args: {
+  validate_audit_id: string;
+  offset: number;
+  limit?: number;
+}): Promise<SalesImportChunkResult> {
+  requireApi();
+  const res = await axiosPost(
+    'sales/import/confirm',
+    {
+      validate_audit_id: args.validate_audit_id,
+      offset: args.offset,
+      limit: args.limit ?? SALES_IMPORT_CHUNK_SIZE,
+    },
+    true,
+  ) as ApiListResponse<SalesImportChunkResult> | SalesImportChunkResult;
+  return unwrapImportResponse(res);
+}
+
+export async function runChunkedSalesImport(
+  validateAuditId: string,
+  total: number,
+  onProgress?: (progress: { processed: number; total: number; imported: number; failed: number }) => void,
+): Promise<SalesImportChunkResult> {
+  let offset = 0;
+  let last: SalesImportChunkResult | null = null;
+  while (offset < total) {
+    last = await confirmSalesImportChunk({
+      validate_audit_id: validateAuditId,
+      offset,
+      limit: SALES_IMPORT_CHUNK_SIZE,
+    });
+    onProgress?.({
+      processed: last.next_offset,
+      total: last.total,
+      imported: last.imported_so_far,
+      failed: last.failed_so_far,
+    });
+    if (last.done) break;
+    offset = last.next_offset;
+  }
+  if (!last) {
+    throw new Error('Import did not process any rows.');
+  }
+  return last;
 }
 
 function invalidateInventoryImportQueries(qc: ReturnType<typeof useQueryClient>) {

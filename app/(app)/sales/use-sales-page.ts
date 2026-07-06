@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
@@ -18,7 +19,7 @@ import {
   useHubs,
   useDownloadSalesImportTemplate,
   useValidateSalesImport,
-  useImportSales,
+  runChunkedSalesImport,
   SALES_PAGE_SIZE,
 } from '@/hooks/use-queries';
 import {
@@ -45,7 +46,7 @@ import {
   type QuickDatePreset,
   type SaleDateFieldFilter,
 } from './sales-utils';
-import type { SalesImportPreviewRow } from '@/types/api';
+import type { SalesImportChunkResult, SalesImportPreviewRow } from '@/types/api';
 import { isHistoricalDate } from '@/lib/historical-date';
 
 export function useSalesPage() {
@@ -129,8 +130,8 @@ export function useSalesPage() {
   const voidSale = useVoidSale();
   const downloadTemplate = useDownloadSalesImportTemplate();
   const validateImport = useValidateSalesImport();
-  const importSales = useImportSales();
   const importInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -171,7 +172,11 @@ export function useSalesPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importPreview, setImportPreview] = useState<SalesImportPreviewRow[]>([]);
   const [importSummary, setImportSummary] = useState<{ total: number; valid: number; invalid: number } | null>(null);
+  const [validateAuditId, setValidateAuditId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ processed: number; total: number; imported: number; failed: number } | null>(null);
+  const [importResult, setImportResult] = useState<SalesImportChunkResult | null>(null);
+  const [showImportConfirm, setShowImportConfirm] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedCustomerSearch(customerSearch.trim()), 300);
@@ -568,10 +573,15 @@ export function useSalesPage() {
     setShowImportModal(true);
     setImportPreview([]);
     setImportSummary(null);
+    setValidateAuditId(null);
+    setImportProgress(null);
+    setImportResult(null);
+    setShowImportConfirm(false);
     validateImport.mutate(file, {
       onSuccess: (data) => {
         setImportPreview(data.rows);
         setImportSummary(data.summary);
+        setValidateAuditId(data.validate_audit_id ?? null);
         if (data.summary.total === 0) {
           toast.error('No data rows found on the Sales sheet.');
           setShowImportModal(false);
@@ -585,29 +595,52 @@ export function useSalesPage() {
   };
 
   const handleImportConfirm = async () => {
-    const rows = importPreview.filter((r) => r.valid && r.resolved).map((r) => r.resolved!);
-    if (rows.length === 0) {
+    const validCount = importPreview.filter((r) => r.valid && r.resolved).length;
+    if (validCount === 0) {
       toast.error('No valid rows to import.');
       return;
     }
+    if (!validateAuditId) {
+      toast.error('Validation session expired. Please re-upload the file.');
+      return;
+    }
+    if (!showImportConfirm) {
+      setShowImportConfirm(true);
+      return;
+    }
+
     setImporting(true);
-    importSales.mutate(rows, {
-      onSuccess: (result) => {
-        setImporting(false);
+    setImportProgress({ processed: 0, total: validCount, imported: 0, failed: 0 });
+    setImportResult(null);
+    try {
+      const result = await runChunkedSalesImport(validateAuditId, validCount, (progress) => {
+        setImportProgress(progress);
+      });
+      setImportResult(result);
+      setImporting(false);
+      setShowImportConfirm(false);
+      await queryClient.invalidateQueries({ queryKey: ['sales'] });
+      await queryClient.invalidateQueries({ queryKey: ['customers'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboardMetrics'] });
+      if (result.failed_so_far > 0) {
+        toast.warning(`Imported ${result.imported_so_far} of ${result.total} sales. ${result.failed_so_far} failed.`);
+      } else if (result.imported_so_far < result.total) {
+        toast.warning(`Imported ${result.imported_so_far} of ${result.total} sales.`);
+      } else {
+        toast.success(`Imported ${result.imported_so_far} sales.`);
+      }
+      if (result.failed_so_far === 0 && result.imported_so_far === result.total) {
         setShowImportModal(false);
         setImportPreview([]);
         setImportSummary(null);
-        if (result.failed > 0) {
-          toast.warning(`Imported ${result.imported} sales. ${result.failed} failed.`);
-        } else {
-          toast.success(`Imported ${result.imported} sales.`);
-        }
-      },
-      onError: (err) => {
-        setImporting(false);
-        toast.error(err.message || 'Import failed.');
-      },
-    });
+        setValidateAuditId(null);
+        setImportProgress(null);
+        setImportResult(null);
+      }
+    } catch (err) {
+      setImporting(false);
+      toast.error(err instanceof Error ? err.message : 'Import failed.');
+    }
   };
 
   const saleStockLogs = useMemo(() => {
@@ -716,7 +749,12 @@ export function useSalesPage() {
     setImportPreview,
     importSummary,
     setImportSummary,
+    validateAuditId,
     importing,
+    importProgress,
+    importResult,
+    showImportConfirm,
+    setShowImportConfirm,
     validating: validateImport.isPending,
     handleDownloadTemplate,
     handleImportFile,

@@ -544,12 +544,24 @@ export interface SalesImportPreviewRow {
 export interface SalesImportValidateResponse {
   rows: SalesImportPreviewRow[];
   summary: { total: number; valid: number; invalid: number };
+  validate_audit_id?: string;
 }
 
 export interface SalesImportResult {
   imported: number;
   failed: number;
   results: { lineNo: number; success: boolean; error?: string }[];
+}
+
+export interface SalesImportChunkResult extends SalesImportResult {
+  offset: number;
+  next_offset: number;
+  total: number;
+  done: boolean;
+  imported_so_far: number;
+  failed_so_far: number;
+  imported_in_chunk: number;
+  failed_in_chunk: number;
 }
 
 export interface ApiBulkImportMovementRow {

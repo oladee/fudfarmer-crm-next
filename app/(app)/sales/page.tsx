@@ -90,7 +90,8 @@ export default function SalesPage() {
     handleProductChange, handleQuantityChange, handleSaveSale,
     savingSale, savingEdit, voidingSale, updatingDelivery,
     showImportModal, setShowImportModal, importPreview, setImportPreview, importSummary, setImportSummary,
-    importing, validating, handleDownloadTemplate, handleImportFile, handleImportConfirm, importInputRef,
+    validateAuditId, importing, importProgress, importResult, showImportConfirm, setShowImportConfirm,
+    validating, handleDownloadTemplate, handleImportFile, handleImportConfirm, importInputRef,
     downloadingTemplate, handleExport,
     btnPrimary, btnSecondary,
   } = useSalesPage();
@@ -106,6 +107,7 @@ export default function SalesPage() {
     setShowImportModal(false);
     setImportPreview([]);
     setImportSummary(null);
+    setShowImportConfirm(false);
   };
 
   const kpiCards = [
@@ -410,7 +412,11 @@ export default function SalesPage() {
         summary={importSummary}
         importing={importing}
         validating={validating}
+        showImportConfirm={showImportConfirm}
+        importProgress={importProgress}
+        importResult={importResult}
         onConfirm={handleImportConfirm}
+        onCancelConfirm={() => setShowImportConfirm(false)}
         onDownloadTemplate={handleDownloadTemplate}
       />
     </div>
