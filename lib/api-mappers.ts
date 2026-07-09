@@ -419,7 +419,6 @@ export function normalizeDashboardMetrics(
     feedbacks?: Feedback[];
     enquiries?: Enquiry[];
     customers?: Customer[];
-    sales?: Sale[];
   } = {},
 ): DashboardMetricsData {
   const creditRows = extras.creditSummary ?? [];
@@ -469,7 +468,6 @@ export function normalizeDashboardMetrics(
     pipelineValue: raw.pipelineValue ?? 0,
     openComplaints: raw.openComplaints ?? 0,
     revenueTrend: raw.revenue_trend ?? [],
-    sales: extras.sales ?? [],
     customers,
     inventory,
     feedbacks,

@@ -371,6 +371,49 @@ export interface ApiDashboardMetricsRaw {
   revenue_trend?: { date: string; amount: number }[];
 }
 
+export type DashboardPeriod = 'today' | 'week' | 'month' | 'all';
+
+export interface DashboardSalesSummary {
+  revenue: number;
+  orders: number;
+  profit?: number;
+  aov: number;
+  cashRevenue: number;
+  creditRevenue: number;
+  walkInRevenue: number;
+  deliveryRevenue: number;
+  trend: { date: string; revenue: number }[];
+}
+
+export interface DashboardCategoryRevenueRow {
+  name: string;
+  revenue: number;
+  orders: number;
+  percentage: number;
+  fill: string;
+}
+
+export interface DashboardCategoryRevenue {
+  totalRevenue: number;
+  categories: DashboardCategoryRevenueRow[];
+}
+
+export const EMPTY_DASHBOARD_SALES_SUMMARY: DashboardSalesSummary = {
+  revenue: 0,
+  orders: 0,
+  aov: 0,
+  cashRevenue: 0,
+  creditRevenue: 0,
+  walkInRevenue: 0,
+  deliveryRevenue: 0,
+  trend: [],
+};
+
+export const EMPTY_DASHBOARD_CATEGORY_REVENUE: DashboardCategoryRevenue = {
+  totalRevenue: 0,
+  categories: [],
+};
+
 export interface DashboardMetricsData {
   totalCustomers: number;
   revenueToday: number;
@@ -390,7 +433,6 @@ export interface DashboardMetricsData {
   openComplaints: number;
   revenueTrend: { date: string; amount: number }[];
   /** Chart/list payloads bundled by useDashboardMetrics */
-  sales: Sale[];
   customers: Customer[];
   inventory: InventoryItem[];
   feedbacks: Feedback[];

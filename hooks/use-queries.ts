@@ -28,6 +28,11 @@ import {
   ApiSegment,
   ApiDashboardMetricsRaw,
   DashboardMetricsData,
+  DashboardPeriod,
+  DashboardSalesSummary,
+  DashboardCategoryRevenue,
+  EMPTY_DASHBOARD_SALES_SUMMARY,
+  EMPTY_DASHBOARD_CATEGORY_REVENUE,
   AnalyticsOverviewData,
   EMPTY_ANALYTICS_OVERVIEW,
   ApiBulkImportSaleRow,
@@ -1533,6 +1538,34 @@ export function useDeleteTask() {
 }
 
 // --- Dashboard ---
+export function useDashboardSalesSummary(period: DashboardPeriod = 'month') {
+  return useQuery({
+    queryKey: ['dashboardSalesSummary', period],
+    queryFn: async (): Promise<DashboardSalesSummary> => {
+      if (!HAS_API) return EMPTY_DASHBOARD_SALES_SUMMARY;
+      const res = await axiosGet(
+        `dashboard/sales-summary${buildQuery({ period })}`,
+        true,
+      ) as ApiResponse<DashboardSalesSummary>;
+      return res.data;
+    },
+  });
+}
+
+export function useDashboardRevenueByCategory(period: DashboardPeriod = 'month') {
+  return useQuery({
+    queryKey: ['dashboardRevenueByCategory', period],
+    queryFn: async (): Promise<DashboardCategoryRevenue> => {
+      if (!HAS_API) return EMPTY_DASHBOARD_CATEGORY_REVENUE;
+      const res = await axiosGet(
+        `dashboard/revenue-by-category${buildQuery({ period })}`,
+        true,
+      ) as ApiResponse<DashboardCategoryRevenue>;
+      return res.data;
+    },
+  });
+}
+
 export function useDashboardMetrics(): ReturnType<typeof useQuery<DashboardMetricsData>> {
   return useQuery({
     queryKey: ['dashboardMetrics'],
@@ -1546,7 +1579,6 @@ export function useDashboardMetrics(): ReturnType<typeof useQuery<DashboardMetri
         feedbackRaw,
         enquiryRaw,
         customerRaw,
-        salesRes,
       ] = await Promise.all([
         axiosGet('dashboard/metrics', true) as Promise<ApiDashboardMetricsRaw>,
         axiosGet('credits/summary', true) as Promise<ApiListResponse<ApiCreditCustomerSummary[]>>,
@@ -1554,7 +1586,6 @@ export function useDashboardMetrics(): ReturnType<typeof useQuery<DashboardMetri
         axiosGet('feedbacks', true),
         axiosGet('enquiries', true),
         axiosGet('customers', true),
-        axiosGet('sales', true) as Promise<ApiListResponse<{ items: ApiSale[] }>>,
       ]);
 
       const hubMap = await fetchHubMap();
@@ -1563,7 +1594,6 @@ export function useDashboardMetrics(): ReturnType<typeof useQuery<DashboardMetri
       const enquiryList: ApiEnquiry[] = Array.isArray(enquiryRaw) ? enquiryRaw : (enquiryRaw as ApiListResponse<ApiEnquiry[]>).data ?? [];
       const customerList = parseCustomerListResponse(customerRaw);
       const customers = customerList.data.map((c) => mapCustomer(c, hubMap));
-      const sales = (salesRes.data?.items ?? []).map((s) => mapSale(s, hubMap));
 
       return normalizeDashboardMetrics(metricsRaw, {
         creditSummary: creditSummaryRes.data,
@@ -1571,7 +1601,6 @@ export function useDashboardMetrics(): ReturnType<typeof useQuery<DashboardMetri
         feedbacks: feedbackList.map(mapFeedback),
         enquiries: enquiryList.map(mapEnquiry),
         customers,
-        sales,
       });
     },
   });

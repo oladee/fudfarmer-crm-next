@@ -4,7 +4,9 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
-import { useDashboardMetrics } from '@/hooks/use-queries';
+import { useDashboardMetrics, useDashboardSalesSummary, useDashboardRevenueByCategory, useSales } from '@/hooks/use-queries';
+import type { DashboardPeriod } from '@/types/api';
+import { EMPTY_DASHBOARD_SALES_SUMMARY } from '@/types/api';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area, PieChart, Pie, Cell, Legend,
@@ -15,7 +17,7 @@ import {
   ShoppingCart, MessageSquare, ClipboardList, Wallet,
   BarChart3, UserPlus, PackagePlus, Receipt,
 } from 'lucide-react';
-import { SalesChannel, CustomerType } from '@/types';
+import { CustomerType } from '@/types';
 
 const NAIRA = '\u20A6';
 const fmt = (n: number) => `${NAIRA}${n.toLocaleString()}`;
@@ -35,29 +37,27 @@ const CAT_COLORS: Record<string, string> = {
 
 const CREDIT_COLORS = ['#f59e0b', '#ef4444', '#16a34a'];
 
-type Period = 'today' | 'week' | 'month' | 'all';
-
-function getCutoff(period: Period): Date | null {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  if (period === 'today') return d;
-  if (period === 'week') { d.setDate(d.getDate() - d.getDay()); return d; }
-  if (period === 'month') { d.setDate(1); return d; }
-  return null;
-}
-
 export default function DashboardPage() {
   const router = useRouter();
-  const [period, setPeriod] = useState<Period>('month');
-  const [catPeriod, setCatPeriod] = useState<Period>('month');
+  const [period, setPeriod] = useState<DashboardPeriod>('month');
+  const [catPeriod, setCatPeriod] = useState<DashboardPeriod>('month');
   const [custFilter, setCustFilter] = useState<'all' | 'B2B' | 'B2C'>('all');
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
 
   const { can, isAdmin, user } = usePermissions();
   const { data: metrics } = useDashboardMetrics();
+  const { data: salesSummary } = useDashboardSalesSummary(period);
+  const { data: categoryRevenue } = useDashboardRevenueByCategory(catPeriod);
+  const { data: customerSalesResult } = useSales(
+    {
+      search: selectedCustomer?.name,
+      limit: 50,
+      exclude_voided: true,
+    },
+    { enabled: !!selectedCustomer },
+  );
 
   const customers = metrics?.customers ?? [];
-  const sales = metrics?.sales ?? [];
   const inventory = metrics?.inventory ?? [];
   const creditSummaries = metrics?.creditSummaries ?? [];
   const feedbacks = metrics?.feedbacks ?? [];
@@ -82,56 +82,34 @@ export default function DashboardPage() {
     totalCustomers: 0, newCustomersThisMonth: 0, totalOutstanding: 0,
   };
 
-  const cutoff = useMemo(() => getCutoff(period), [period]);
-  const periodSales = useMemo(() => cutoff ? sales.filter((s) => new Date(s.date) >= cutoff) : sales, [sales, cutoff]);
-  const apiRevenueTrend = metrics?.revenueTrend ?? [];
-
-  const catCutoff = useMemo(() => getCutoff(catPeriod), [catPeriod]);
-  const catPeriodSales = useMemo(() => catCutoff ? sales.filter((s) => new Date(s.date) >= catCutoff) : sales, [sales, catCutoff]);
-
-  // ═══ SALES ═══
   const salesData = useMemo(() => {
-    const revenue = periodSales.reduce((a, s) => a + s.amount, 0);
-    const orders = periodSales.length;
-    const profit = periodSales.reduce((a, s) => a + s.profitAmount, 0);
-    const aov = orders > 0 ? Math.round(revenue / orders) : 0;
-    const cashRevenue = periodSales.filter((s) => !s.isCredit).reduce((a, s) => a + s.amount, 0);
-    const creditRevenue = periodSales.filter((s) => s.isCredit).reduce((a, s) => a + s.amount, 0);
-    const walkIn = periodSales.filter((s) => !s.channel || s.channel === SalesChannel.WALK_IN).reduce((a, s) => a + s.amount, 0);
-    const delivery = periodSales.filter((s) => s.channel === SalesChannel.DELIVERY).reduce((a, s) => a + s.amount, 0);
+    const s = salesSummary ?? EMPTY_DASHBOARD_SALES_SUMMARY;
+    return {
+      revenue: s.revenue,
+      orders: s.orders,
+      profit: s.profit ?? 0,
+      aov: s.aov,
+      cashRevenue: s.cashRevenue,
+      creditRevenue: s.creditRevenue,
+      walkIn: s.walkInRevenue,
+      delivery: s.deliveryRevenue,
+      trend: s.trend.map((row) => ({
+        date: new Date(row.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        revenue: row.revenue,
+      })),
+    };
+  }, [salesSummary]);
 
-    // Chart data
-    const dailyMap: Record<string, number> = {};
-    periodSales.forEach((s) => { dailyMap[s.date] = (dailyMap[s.date] || 0) + s.amount; });
-    const trendFromSales = Object.entries(dailyMap)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, rev]) => ({
-        date: new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        revenue: rev,
-      }));
-    const trend =
-      period === 'month' && apiRevenueTrend.length > 0
-        ? apiRevenueTrend.map((row) => ({
-            date: new Date(row.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-            revenue: row.amount,
-          }))
-        : trendFromSales;
-
-    return { revenue, orders, profit, aov, cashRevenue, creditRevenue, walkIn, delivery, trend };
-  }, [periodSales, period, apiRevenueTrend]);
-
-  // ═══ REVENUE BY CATEGORY ═══
-  const categoryData = useMemo(() => {
-    const catMap: Record<string, number> = {};
-    catPeriodSales.forEach((s) => {
-      const invItem = inventory.find((i) => s.productDetails?.includes(i.name));
-      const cat = invItem?.category || 'Other';
-      catMap[cat] = (catMap[cat] || 0) + s.amount;
-    });
-    return Object.entries(catMap)
-      .map(([name, value]) => ({ name, value, fill: CAT_COLORS[name] || CAT_COLORS.Other }))
-      .sort((a, b) => b.value - a.value);
-  }, [catPeriodSales, inventory]);
+  const categoryData = useMemo(
+    () =>
+      (categoryRevenue?.categories ?? []).map((cat) => ({
+        name: cat.name,
+        value: cat.revenue,
+        fill: cat.fill,
+        percentage: cat.percentage,
+      })),
+    [categoryRevenue],
+  );
 
   // ═══ TOP CUSTOMERS ═══
   const customerData = useMemo(() => {
@@ -198,14 +176,14 @@ export default function DashboardPage() {
   // ═══ PURCHASE HISTORY FOR SELECTED CUSTOMER ═══
   const purchaseHistory = useMemo(() => {
     if (!selectedCustomer) return [];
-    return sales
+    return (customerSalesResult?.items ?? [])
       .filter((s) => s.customerId === selectedCustomer.id)
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [selectedCustomer, sales]);
+  }, [selectedCustomer, customerSalesResult]);
 
-  const PeriodTabs = ({ value, onChange }: { value: Period; onChange: (p: Period) => void }) => (
+  const PeriodTabs = ({ value, onChange }: { value: DashboardPeriod; onChange: (p: DashboardPeriod) => void }) => (
     <div className="flex items-center gap-0.5 bg-muted/40 p-0.5 rounded-lg border">
-      {([['today', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly'], ['all', 'All']] as [Period, string][]).map(([p, label]) => (
+      {([['today', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly'], ['all', 'All']] as [DashboardPeriod, string][]).map(([p, label]) => (
         <button key={p} onClick={() => onChange(p)}
           className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${value === p ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
           {label}
@@ -458,17 +436,14 @@ export default function DashboardPage() {
 
               {/* Table */}
               <div className="space-y-2">
-                {categoryData.map((cat) => {
-                  const total = categoryData.reduce((a, c) => a + c.value, 0);
-                  return (
+                {categoryData.map((cat) => (
                     <div key={cat.name} className="flex items-center gap-3 py-2 border-b last:border-0">
                       <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: cat.fill }} />
                       <span className="text-sm font-medium flex-1">{cat.name}</span>
-                      <span className="text-xs text-muted-foreground">{pct(cat.value, total)}%</span>
+                      <span className="text-xs text-muted-foreground">{cat.percentage}%</span>
                       <span className="text-sm font-bold w-20 text-right">{fmtK(cat.value)}</span>
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             </div>
           ) : (
