@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { HAS_API, requireApi } from '@/lib/require-api';
 import { axiosGet, axiosPost, axiosPatch, axiosDelete, axiosGetBlob, axiosPostForm } from '@/lib/api';
 import { customerTypeToApi, customerCompanyNameForApi, customerPhoneForApi } from '@/lib/customer-helpers';
@@ -572,6 +572,7 @@ export function useCustomers(filters?: {
   return useQuery({
     queryKey: ['customers', filters],
     enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
     queryFn: async (): Promise<CustomerListResult> => {
       if (!HAS_API) return EMPTY_CUSTOMER_LIST;
       const hubs = await qc.fetchQuery({
@@ -753,6 +754,7 @@ export function useSales(
   return useQuery({
     queryKey: ['sales', filters],
     enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
     queryFn: async (): Promise<SalesListResult> => {
       if (!HAS_API) return EMPTY_SALES_LIST;
       const hubMap = await fetchHubMap();

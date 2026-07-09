@@ -24,6 +24,8 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
 import { SubmitButton } from '@/components/submit-button';
+import { PaginationControls } from '@/components/ui/pagination-controls';
+import { MetricValue } from '@/components/ui/metric-value';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer,
 } from 'recharts';
@@ -119,6 +121,7 @@ export default function CustomersPage() {
     limit: CUSTOMERS_PAGE_SIZE,
   });
   const customers = customerList?.items ?? [];
+  const tableLoading = customersLoading || customersFetching;
   const customerMeta = customerList?.meta ?? { page: 1, limit: CUSTOMERS_PAGE_SIZE, total: 0, totalPages: 1 };
   const kpis = customerList?.summary ?? { total: 0, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 };
   const { data: agents = [] } = useAgents(undefined, { enabled: showAddModal });
@@ -489,27 +492,27 @@ export default function CustomersPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><Users size={14} className="text-muted-foreground" /><span className="text-[10px] font-bold uppercase text-muted-foreground">Total</span></div>
-          <p className="text-2xl font-black">{kpis.total}</p>
+          <MetricValue value={kpis.total} />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><Building2 size={14} className="text-blue-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">B2B</span></div>
-          <p className="text-2xl font-black">{kpis.b2b}</p>
+          <MetricValue value={kpis.b2b} />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><User size={14} className="text-green-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">B2C</span></div>
-          <p className="text-2xl font-black">{kpis.b2c}</p>
+          <MetricValue value={kpis.b2c} />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><RefreshCw size={14} className="text-purple-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">Repeat</span></div>
-          <p className="text-2xl font-black">{kpis.repeat}</p>
+          <MetricValue value={kpis.repeat} />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><span className="text-emerald-600 text-sm font-bold">₦</span><span className="text-[10px] font-bold uppercase text-muted-foreground">Revenue</span></div>
-          <p className="text-lg font-black">&#8358;{kpis.totalRevenue.toLocaleString()}</p>
+          <MetricValue value={`₦${kpis.totalRevenue.toLocaleString()}`} className="text-lg" />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><BarChart3 size={14} className="text-orange-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">Avg Value</span></div>
-          <p className="text-lg font-black">&#8358;{Math.round(kpis.avgValue).toLocaleString()}</p>
+          <MetricValue value={`₦${Math.round(kpis.avgValue).toLocaleString()}`} className="text-lg" />
         </div>
       </div>
 
@@ -539,7 +542,7 @@ export default function CustomersPage() {
         </div>
         <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
           {customerMeta.total} customer{customerMeta.total !== 1 ? 's' : ''}
-          {(customersLoading || customersFetching) && ' · Loading...'}
+          {tableLoading && ' · Loading...'}
         </span>
       </div>
 
@@ -618,8 +621,8 @@ export default function CustomersPage() {
                   </tr>
                 );
               })}
-              {customers.length === 0 && !customersLoading && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No customers found matching your filters.</td></tr>}
-              {customersLoading && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">Loading customers...</td></tr>}
+              {customers.length === 0 && !tableLoading && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">No customers found matching your filters.</td></tr>}
+              {tableLoading && <tr><td colSpan={8} className="p-8 text-center text-muted-foreground">Loading customers...</td></tr>}
             </tbody>
           </table>
         </div>
@@ -629,27 +632,12 @@ export default function CustomersPage() {
               ? 'No customers to show'
               : `Showing ${(customerMeta.page - 1) * customerMeta.limit + 1}–${Math.min(customerMeta.page * customerMeta.limit, customerMeta.total)} of ${customerMeta.total}`}
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={customerMeta.page <= 1 || customersLoading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <span className="text-sm text-muted-foreground px-2">
-              Page {customerMeta.page} of {customerMeta.totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={customerMeta.page >= customerMeta.totalPages || customersLoading}
-              onClick={() => setPage((p) => p + 1)}
-              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-            >
-              Next
-            </button>
-          </div>
+          <PaginationControls
+            page={customerMeta.page}
+            totalPages={customerMeta.totalPages}
+            onPageChange={setPage}
+            disabled={tableLoading}
+          />
         </div>
       </div>
 
@@ -923,19 +911,19 @@ export default function CustomersPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-4 rounded-xl border bg-muted/20">
                       <p className="text-[10px] font-bold uppercase text-muted-foreground">Total Orders</p>
-                      <p className="text-2xl font-black">{selectedCustomer.totalOrders}</p>
+                      <MetricValue value={selectedCustomer.totalOrders} />
                     </div>
                     <div className="p-4 rounded-xl border bg-muted/20">
                       <p className="text-[10px] font-bold uppercase text-muted-foreground">Total Spent</p>
-                      <p className="text-2xl font-black">&#8358;{selectedCustomer.totalSpent.toLocaleString()}</p>
+                      <MetricValue value={`₦${selectedCustomer.totalSpent.toLocaleString()}`} />
                     </div>
                     <div className="p-4 rounded-xl border bg-muted/20">
                       <p className="text-[10px] font-bold uppercase text-muted-foreground">Avg Order Value</p>
-                      <p className="text-2xl font-black">&#8358;{selectedCustomer.totalOrders > 0 ? Math.round(selectedCustomer.totalSpent / selectedCustomer.totalOrders).toLocaleString() : '0'}</p>
+                      <MetricValue value={`₦${selectedCustomer.totalOrders > 0 ? Math.round(selectedCustomer.totalSpent / selectedCustomer.totalOrders).toLocaleString() : '0'}`} />
                     </div>
                     <div className="p-4 rounded-xl border bg-muted/20">
                       <p className="text-[10px] font-bold uppercase text-muted-foreground">Last Purchase</p>
-                      <p className="text-lg font-black">{customerSales.length > 0 ? customerSales[0].date : 'None'}</p>
+                      <MetricValue value={customerSales.length > 0 ? customerSales[0].date : 'None'} className="text-lg" />
                     </div>
                   </div>
 

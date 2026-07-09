@@ -3,7 +3,6 @@
 import { X, Edit3, Save } from 'lucide-react';
 import { Sale, DeliveryStatus, Hub } from '@/types';
 import type { HubScopeFilter } from '@/hooks/use-hub-scope';
-import { statusColor } from './sales-utils';
 import type { DetailTab } from './sales-utils';
 import type { Permission } from '@/lib/permissions';
 import { ModalDialog } from './modal-dialog';
@@ -62,7 +61,6 @@ function DetailPanelHeader({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-bold truncate">{sale.customerName}</h2>
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusColor(sale.status)}`}>{sale.status}</span>
           {sale.isCredit && <span className="text-xs font-semibold px-2 py-0.5 rounded bg-orange-50 text-orange-700">Credit</span>}
         </div>
         <p className="text-sm text-muted-foreground mt-0.5">{sale.date} &middot; {sale.agentName} &middot; {sale.channel || 'Walk-In'}</p>

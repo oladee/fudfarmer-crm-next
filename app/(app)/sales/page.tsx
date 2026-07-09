@@ -15,6 +15,8 @@ import { useSalesPage } from './use-sales-page';
 import { SaleDetailPanel } from './sale-detail-panel';
 import { AddSaleModal } from './add-sale-modal';
 import { SalesImportModal } from './sales-import-modal';
+import { PaginationControls } from '@/components/ui/pagination-controls';
+import { MetricValue } from '@/components/ui/metric-value';
 import type { Sale } from '@/types';
 
 type SalesTableRowProps = Readonly<{
@@ -103,6 +105,7 @@ export default function SalesPage() {
     btnPrimary, btnSecondary,
   } = useSalesPage();
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const tableLoading = salesLoading || salesFetching;
 
   const openSaleDetail = (sale: Sale) => {
     setSelectedSale(sale);
@@ -206,7 +209,7 @@ export default function SalesPage() {
               {kpi.icon}
               <span className="text-xs font-medium text-muted-foreground">{kpi.label}{hasFilters ? ' (filtered)' : ''}</span>
             </div>
-            <p className="text-lg font-bold">{kpi.value}</p>
+            <MetricValue value={kpi.value} className="font-bold" />
             {'change' in kpi && kpi.change !== undefined && kpi.change !== 0 && (
               <div className={`flex items-center gap-1 text-xs font-medium mt-0.5 ${kpi.change > 0 ? 'text-green-600' : 'text-red-600'}`}>
                 {kpi.change > 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
@@ -306,10 +309,10 @@ export default function SalesPage() {
               {filteredSales.map((sale) => (
                 <SalesTableRow key={sale.id} sale={sale} onSelect={openSaleDetail} />
               ))}
-              {filteredSales.length === 0 && !salesLoading && (
+              {filteredSales.length === 0 && !tableLoading && (
                 <tr><td colSpan={11} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>
               )}
-              {salesLoading && (
+              {tableLoading && (
                 <tr><td colSpan={11} className="p-12 text-center text-muted-foreground italic">Loading sales...</td></tr>
               )}
             </tbody>
@@ -321,27 +324,12 @@ export default function SalesPage() {
               ? 'No sales to show'
               : `Page ${salesMeta.page} of ${salesMeta.totalPages}`}
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={salesMeta.page <= 1 || salesLoading || salesFetching}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <span className="text-sm text-muted-foreground px-2">
-              Page {salesMeta.page} of {salesMeta.totalPages}
-            </span>
-            <button
-              type="button"
-              disabled={salesMeta.page >= salesMeta.totalPages || salesLoading || salesFetching}
-              onClick={() => setPage((p) => p + 1)}
-              className="inline-flex h-9 items-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-            >
-              Next
-            </button>
-          </div>
+          <PaginationControls
+            page={salesMeta.page}
+            totalPages={salesMeta.totalPages}
+            onPageChange={setPage}
+            disabled={tableLoading}
+          />
         </div>
       </div>
 
