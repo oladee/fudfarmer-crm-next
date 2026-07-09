@@ -795,8 +795,13 @@ export function useCreateSale() {
       profit_margin?: number;
       profit_amount?: number;
       date?: string;
-      product_details?: string;
-      items?: { product_id: string; quantity: number; unit_price: number }[];
+      item?: {
+        product_id?: string;
+        product_name?: string;
+        quantity: number;
+        unit?: string;
+        category?: string;
+      };
     }) => {
       const res = await axiosPost('sales', dto, true) as ApiListResponse<{ sale: ApiSale; credit_record?: ApiCreditRecord }>;
       return {
@@ -1448,6 +1453,7 @@ export function useUpdateCompensationStatus() {
 export function useAuditLogs(filters?: {
   entity_type?: string;
   user_id?: string;
+  module?: 'sales' | 'inventory' | 'customers' | 'system';
   date_from?: string;
   date_to?: string;
   search?: string;
@@ -1465,6 +1471,7 @@ export function useAuditLogs(filters?: {
       const params: Record<string, string | number | undefined> = {
         entity_type: filters?.entity_type,
         user_id: filters?.user_id,
+        module: filters?.module,
         date_from: filters?.date_from,
         date_to: filters?.date_to,
         search: filters?.search,

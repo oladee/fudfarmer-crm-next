@@ -33,6 +33,7 @@ export type SaleDetailPanelProps = Readonly<{
   voidingSale?: boolean;
   updatingDelivery?: boolean;
   can: (permission: Permission) => boolean;
+  isCompanyAdmin: boolean;
   hubScope: HubScopeFilter;
   activeHubs: Hub[];
 }>;
@@ -104,6 +105,7 @@ export function SaleDetailPanel({
   voidingSale = false,
   updatingDelivery = false,
   can,
+  isCompanyAdmin,
   hubScope,
   activeHubs,
 }: SaleDetailPanelProps) {
@@ -153,6 +155,7 @@ export function SaleDetailPanel({
             voidingSale={voidingSale}
             updatingDelivery={updatingDelivery}
             can={can}
+            isCompanyAdmin={isCompanyAdmin}
             hubScope={hubScope}
             activeHubs={activeHubs}
           />

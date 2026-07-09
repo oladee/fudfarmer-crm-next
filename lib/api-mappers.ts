@@ -161,6 +161,15 @@ export function mapCustomer(c: ApiCustomer, hubMap?: Record<string, string>): Cu
 
 export function mapSale(s: ApiSale, hubMap?: Record<string, string>): Sale {
   const paymentMode = s.payment_mode || 'Full Payment';
+  const item = s.item ?? s.items?.[0];
+  const itemQuantity = item?.quantity;
+  const itemUnit = item?.unit;
+  const itemName = item?.product_name;
+  const derivedProductDetails =
+    itemQuantity && itemName
+      ? `${itemQuantity}${itemUnit ? ` ${itemUnit}` : ''} of ${itemName}`
+      : itemName;
+
   return {
     id: s.id || s._id || '',
     customerId: refId(s.customer),
@@ -176,7 +185,16 @@ export function mapSale(s: ApiSale, hubMap?: Record<string, string>): Sale {
     hubId: refId(s.hub),
     hubName: s.hub_name ?? (s.hub ? resolveHubName(s.hub, hubMap) : ''),
     status: s.status as Sale['status'],
-    productDetails: s.product_details,
+    item: item
+      ? {
+          productId: item.product_id || item.product,
+          productName: item.product_name,
+          quantity: item.quantity,
+          unit: item.unit,
+          category: item.category,
+        }
+      : undefined,
+    productDetails: s.product_details ?? derivedProductDetails,
     isCredit: paymentMode !== 'Full Payment',
     paymentTerms: s.payment_terms as PaymentTerms | undefined,
     notes: s.notes,

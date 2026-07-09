@@ -166,8 +166,10 @@ export interface ApiCustomerListResponse {
 export interface ApiSaleItem {
   product?: string;
   product_id?: string;
+  product_name?: string;
   quantity: number;
-  unit_price: number;
+  unit?: string;
+  category?: string;
 }
 
 export interface ApiSale {
@@ -194,6 +196,7 @@ export interface ApiSale {
   payment_mode?: string;
   amount_paid?: number;
   due_date?: string;
+  item?: ApiSaleItem;
   items?: ApiSaleItem[];
   credit_record?: string | ApiCreditRecord;
   createdAt?: string;

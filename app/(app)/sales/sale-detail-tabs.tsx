@@ -32,6 +32,7 @@ export type SaleDetailTabProps = Readonly<{
   voidingSale?: boolean;
   updatingDelivery?: boolean;
   can: (permission: Permission) => boolean;
+  isCompanyAdmin: boolean;
   hubScope: HubScopeFilter;
   activeHubs: Hub[];
 }>;
@@ -72,15 +73,17 @@ function DeliveryAdvanceButton({
 
 function OverviewTab({
   sale, isEditing, editForm, setEditForm, showVoidConfirm, setShowVoidConfirm,
-  saleStockLogs, onVoidSale, voidingSale = false, can, hubScope, activeHubs,
+  saleStockLogs, onVoidSale, voidingSale = false, can, isCompanyAdmin, hubScope, activeHubs,
 }: SaleDetailTabProps) {
+  const currentItem = editForm.item ?? sale.item;
+
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
         <div className="p-4 rounded-md border bg-muted/20">
           <p className="text-xs font-medium text-muted-foreground mb-1">Total Amount</p>
           {isEditing ? (
-            <input type="number" value={editForm.amount || ''} onChange={(e) => setEditForm({ ...editForm, amount: Number(e.target.value) })} className={`${INPUT_CLS} h-8 text-lg font-bold`} />
+            <input type="number" step="0.01" value={editForm.amount || ''} onChange={(e) => setEditForm({ ...editForm, amount: Number(e.target.value) })} className={`${INPUT_CLS} h-8 text-lg font-bold`} />
           ) : (
             <p className="text-xl font-bold">{fmt(sale.amount)}</p>
           )}
@@ -88,7 +91,7 @@ function OverviewTab({
         <div className="p-4 rounded-md border bg-muted/20">
           <p className="text-xs font-medium text-muted-foreground mb-1">Amount Paid</p>
           {isEditing ? (
-            <input type="number" value={editForm.amountPaid ?? sale.amountPaid ?? sale.amount} onChange={(e) => setEditForm({ ...editForm, amountPaid: Number(e.target.value) })} className={`${INPUT_CLS} h-8 text-lg font-bold`} />
+            <input type="number" step="0.01" value={editForm.amountPaid ?? sale.amountPaid ?? sale.amount} onChange={(e) => setEditForm({ ...editForm, amountPaid: Number(e.target.value) })} className={`${INPUT_CLS} h-8 text-lg font-bold`} />
           ) : (
             <p className={`text-xl font-bold ${(sale.amountPaid ?? sale.amount) < sale.amount ? 'text-orange-600' : 'text-green-600'}`}>{fmt(sale.amountPaid ?? sale.amount)}</p>
           )}
@@ -115,7 +118,99 @@ function OverviewTab({
           <Package size={14} className="text-primary" />
           <span className="text-sm font-medium">Product Details</span>
         </div>
-        <p className="text-sm">{sale.productDetails || 'No details'}</p>
+        {isEditing && isCompanyAdmin ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground">Product Name</label>
+              <input
+                type="text"
+                value={currentItem?.productName || ''}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    item: {
+                      productId: currentItem?.productId,
+                      productName: e.target.value,
+                      quantity: currentItem?.quantity ?? 1,
+                      unit: currentItem?.unit,
+                      category: currentItem?.category,
+                    },
+                  })
+                }
+                className={`${INPUT_CLS} h-8 text-sm`}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Quantity</label>
+              <input
+                type="number"
+                min={0.01}
+                step="0.01"
+                value={currentItem?.quantity ?? ''}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    item: {
+                      productId: currentItem?.productId,
+                      productName: currentItem?.productName,
+                      quantity: Number(e.target.value) || 0,
+                      unit: currentItem?.unit,
+                      category: currentItem?.category,
+                    },
+                  })
+                }
+                className={`${INPUT_CLS} h-8 text-sm`}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Unit</label>
+              <input
+                type="text"
+                value={currentItem?.unit || ''}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    item: {
+                      productId: currentItem?.productId,
+                      productName: currentItem?.productName,
+                      quantity: currentItem?.quantity ?? 1,
+                      unit: e.target.value,
+                      category: currentItem?.category,
+                    },
+                  })
+                }
+                className={`${INPUT_CLS} h-8 text-sm`}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Category</label>
+              <input
+                type="text"
+                value={currentItem?.category || ''}
+                onChange={(e) =>
+                  setEditForm({
+                    ...editForm,
+                    item: {
+                      productId: currentItem?.productId,
+                      productName: currentItem?.productName,
+                      quantity: currentItem?.quantity ?? 1,
+                      unit: currentItem?.unit,
+                      category: e.target.value,
+                    },
+                  })
+                }
+                className={`${INPUT_CLS} h-8 text-sm`}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm space-y-1">
+            <p><span className="text-muted-foreground">Name:</span> {sale.item?.productName || '—'}</p>
+            <p><span className="text-muted-foreground">Quantity:</span> {sale.item?.quantity ?? '—'}</p>
+            <p><span className="text-muted-foreground">Unit:</span> {sale.item?.unit || '—'}</p>
+            <p><span className="text-muted-foreground">Category:</span> {sale.item?.category || '—'}</p>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4 text-sm">

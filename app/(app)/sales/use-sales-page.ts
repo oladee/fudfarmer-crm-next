@@ -420,12 +420,11 @@ export function useSalesPage() {
         notes: newSale.notes || undefined,
         ...(isAdmin ? { profit_margin: profitMargin, profit_amount: profitAmount } : {}),
         date: saleDate,
-        ...(isHistoricalSale && !selectedProductId
-          ? { product_details: productDetailsText.trim() }
-          : {}),
         ...(selectedProductId && quantity > 0
-          ? { items: [{ product_id: selectedProductId, quantity, unit_price: amount / quantity }] }
-          : {}),
+          ? { item: { product_id: selectedProductId, quantity } }
+          : isHistoricalSale && productDetailsText.trim()
+            ? { item: { product_name: productDetailsText.trim(), quantity: quantity > 0 ? quantity : 1 } }
+            : {}),
       },
       {
         onSuccess: (result) => {
@@ -468,6 +467,7 @@ export function useSalesPage() {
       paymentTerms: selectedSale.paymentTerms,
       channel: selectedSale.channel,
       hubName: selectedSale.hubName,
+      item: selectedSale.item,
     });
     setIsEditing(true);
   };
@@ -487,6 +487,17 @@ export function useSalesPage() {
         delivery_address: editForm.deliveryAddress,
         payment_terms: editForm.paymentTerms,
         channel: editForm.channel,
+        ...(isAdmin && editForm.item
+          ? {
+              item: {
+                product_id: editForm.item.productId,
+                product_name: editForm.item.productName,
+                quantity: editForm.item.quantity,
+                unit: editForm.item.unit,
+                category: editForm.item.category,
+              },
+            }
+          : {}),
         ...(hubId && hubId !== selectedSale.hubId ? { hub_id: hubId } : {}),
       },
       {
@@ -518,7 +529,10 @@ export function useSalesPage() {
       'Date Recorded',
       'Last Updated',
       'Customer',
-      'Product',
+      'Product Name',
+      'Quantity',
+      'Unit',
+      'Category',
       'Agent',
       'Amount',
       ...(isAdmin ? (['Profit', 'Margin %'] as const) : []),
@@ -534,7 +548,10 @@ export function useSalesPage() {
       s.createdAt || '',
       s.updatedAt || '',
       s.customerName,
-      s.productDetails || '',
+      s.item?.productName || '',
+      s.item?.quantity ?? '',
+      s.item?.unit || '',
+      s.item?.category || '',
       s.agentName,
       s.amount,
       ...(isAdmin ? [s.profitAmount, s.profitMargin] : []),

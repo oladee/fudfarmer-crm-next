@@ -780,21 +780,23 @@ export default function SettingsPage() {
               <div className="space-y-2"><label htmlFor="user-name" className={labelCls}>Name *</label><input id="user-name" type="text" value={editingUser.name || ''} onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })} className={inputCls} /></div>
               <div className="space-y-2"><label htmlFor="user-email" className={labelCls}>Email *</label><input id="user-email" type="email" value={editingUser.email || ''} onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })} className={inputCls} /></div>
               <div className="space-y-2"><label htmlFor="user-phone" className={labelCls}>Phone</label><input id="user-phone" type="text" value={editingUser.phone || ''} onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })} className={inputCls} /></div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={`grid gap-4 ${isAdminRole(editingUser.role ?? '') ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 <div className="space-y-2"><label htmlFor="user-role" className={labelCls}>Role</label><select id="user-role" value={editingUser.role} onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })} className={inputCls} disabled={!canSwitchHubs && !!editingUser.id}>{apiRoles.map((r) => (<option key={r._id} value={roleLabel(r)}>{roleLabel(r)}</option>))}</select></div>
-                <div className="space-y-2"><label htmlFor="user-hub" className={labelCls}>Hub</label>
-                  <select
-                    id="user-hub"
-                    value={editingUser.location}
-                    onChange={(e) => setEditingUser({ ...editingUser, location: e.target.value })}
-                    className={inputCls}
-                    disabled={!canSwitchHubs || isAdminRole(editingUser.role ?? '')}
-                  >
-                    {(canSwitchHubs ? activeHubs : hubs.filter((h) => h.id === scopeHubId || h.name === user?.hubName)).map((h) => (
-                      <option key={h.id} value={h.name}>{h.name}</option>
-                    ))}
-                  </select>
-                </div>
+                {!isAdminRole(editingUser.role ?? '') && (
+                  <div className="space-y-2"><label htmlFor="user-hub" className={labelCls}>Hub</label>
+                    <select
+                      id="user-hub"
+                      value={editingUser.location}
+                      onChange={(e) => setEditingUser({ ...editingUser, location: e.target.value })}
+                      className={inputCls}
+                      disabled={!canSwitchHubs}
+                    >
+                      {(canSwitchHubs ? activeHubs : hubs.filter((h) => h.id === scopeHubId || h.name === user?.hubName)).map((h) => (
+                        <option key={h.id} value={h.name}>{h.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               {/* Role preview */}
               <div className="p-3 rounded-lg bg-muted/50 border">

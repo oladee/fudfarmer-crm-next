@@ -25,6 +25,10 @@ type SalesTableRowProps = Readonly<{
 function SalesTableRow({ sale, onSelect }: SalesTableRowProps) {
   const paid = sale.amountPaid ?? (sale.isCredit ? 0 : sale.amount);
   const mode = resolveSalePaymentMode(sale, paid);
+  const productName = sale.item?.productName || '—';
+  const quantity = sale.item?.quantity ?? '—';
+  const unit = sale.item?.unit || '—';
+  const category = sale.item?.category || '—';
 
   return (
     <tr
@@ -42,7 +46,10 @@ function SalesTableRow({ sale, onSelect }: SalesTableRowProps) {
           </span>
         )}
       </td>
-      <td className="p-4 text-muted-foreground text-xs max-w-[300px] truncate">{sale.productDetails}</td>
+      <td className="p-4 text-muted-foreground text-xs max-w-[220px] truncate">{productName}</td>
+      <td className="p-4 text-muted-foreground text-xs text-center whitespace-nowrap">{quantity}</td>
+      <td className="p-4 text-muted-foreground text-xs whitespace-nowrap">{unit}</td>
+      <td className="p-4 text-muted-foreground text-xs whitespace-nowrap">{category}</td>
       <td className="p-4 text-right">
         <span className="font-medium">{fmt(sale.amount)}</span>
         {paid < sale.amount && (
@@ -286,7 +293,10 @@ export default function SalesPage() {
                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">Date Recorded</th>
                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">Last Updated</th>
                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">Customer</th>
-                <th className="h-12 px-4 text-left font-medium text-muted-foreground">Product</th>
+                <th className="h-12 px-4 text-left font-medium text-muted-foreground">Product Name</th>
+                <th className="h-12 px-4 text-center font-medium text-muted-foreground">Quantity</th>
+                <th className="h-12 px-4 text-left font-medium text-muted-foreground">Unit</th>
+                <th className="h-12 px-4 text-left font-medium text-muted-foreground">Category</th>
                 <th className="h-12 px-4 text-right font-medium text-muted-foreground">Amount</th>
                 <th className="h-12 px-4 text-center font-medium text-muted-foreground">Payment</th>
                 <th className="h-12 px-4 w-8" />
@@ -297,10 +307,10 @@ export default function SalesPage() {
                 <SalesTableRow key={sale.id} sale={sale} onSelect={openSaleDetail} />
               ))}
               {filteredSales.length === 0 && !salesLoading && (
-                <tr><td colSpan={8} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>
+                <tr><td colSpan={11} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>
               )}
               {salesLoading && (
-                <tr><td colSpan={8} className="p-12 text-center text-muted-foreground italic">Loading sales...</td></tr>
+                <tr><td colSpan={11} className="p-12 text-center text-muted-foreground italic">Loading sales...</td></tr>
               )}
             </tbody>
           </table>
@@ -358,6 +368,7 @@ export default function SalesPage() {
           voidingSale={voidingSale}
           updatingDelivery={updatingDelivery}
           can={can}
+          isCompanyAdmin={isAdmin}
           hubScope={hubScope}
           activeHubs={activeHubs}
         />

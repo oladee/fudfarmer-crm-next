@@ -29,6 +29,7 @@ const ENTITY_MAP: Record<string, string | undefined> = {
 export default function AuditTrailPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEntity, setFilterEntity] = useState('All');
+  const [filterModule, setFilterModule] = useState<'All' | 'sales' | 'inventory' | 'customers' | 'system'>('All');
   const [filterAgent, setFilterAgent] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -51,6 +52,7 @@ export default function AuditTrailPage() {
     return {
       ...(searchTerm.trim() ? { search: searchTerm.trim() } : {}),
       ...(entityType ? { entity_type: entityType } : {}),
+      ...(filterModule !== 'All' ? { module: filterModule } : {}),
       ...(filterAgent !== 'All' ? { user_id: filterAgent } : {}),
       ...(dateFrom ? { date_from: dateFrom } : {}),
       ...(dateTo ? { date_to: dateTo } : {}),
@@ -58,7 +60,7 @@ export default function AuditTrailPage() {
       page,
       limit: 25,
     };
-  }, [searchTerm, filterEntity, filterAgent, dateFrom, dateTo, activeTab, page]);
+  }, [searchTerm, filterEntity, filterModule, filterAgent, dateFrom, dateTo, activeTab, page]);
 
   const { data: auditList, isLoading, isFetching } = useAuditLogs(apiFilters);
   const logs = auditList?.items ?? [];
@@ -67,7 +69,7 @@ export default function AuditTrailPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, filterEntity, filterAgent, dateFrom, dateTo, activeTab]);
+  }, [searchTerm, filterEntity, filterModule, filterAgent, dateFrom, dateTo, activeTab]);
 
   const applyPreset = (preset: DatePreset) => {
     setActivePreset(preset);
@@ -173,6 +175,7 @@ export default function AuditTrailPage() {
           <div className="relative w-full sm:w-80"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input type="text" placeholder="Search by agent or action..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pl-10 text-sm focus:outline-none focus:ring-1 focus:ring-ring" /></div>
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 border rounded-md px-3 py-1.5 bg-background"><Filter size={14} className="text-muted-foreground" /><select value={filterEntity} onChange={(e) => setFilterEntity(e.target.value)} className="bg-transparent border-none text-sm font-medium focus:outline-none"><option value="All">All Entities</option><option>Inventory</option><option>Sale</option><option>Customer</option><option>System</option></select></div>
+            <div className="flex items-center gap-2 border rounded-md px-3 py-1.5 bg-background"><Box size={14} className="text-muted-foreground" /><select value={filterModule} onChange={(e) => setFilterModule(e.target.value as 'All' | 'sales' | 'inventory' | 'customers' | 'system')} className="bg-transparent border-none text-sm font-medium focus:outline-none"><option value="All">All Modules</option><option value="sales">Sales</option><option value="inventory">Inventory</option><option value="customers">Customers</option><option value="system">System</option></select></div>
             <div className="flex items-center gap-2 border rounded-md px-3 py-1.5 bg-background"><User size={14} className="text-muted-foreground" /><select value={filterAgent} onChange={(e) => setFilterAgent(e.target.value)} className="bg-transparent border-none text-sm font-medium focus:outline-none"><option value="All">All Agents</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></div>
           </div>
         </div>

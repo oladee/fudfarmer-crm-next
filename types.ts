@@ -330,6 +330,13 @@ export interface Sale {
   hubId?: string;
   hubName?: string;
   status: 'Pending' | 'Approved' | 'Paid' | 'Voided';
+  item?: {
+    productId?: string;
+    productName?: string;
+    quantity: number;
+    unit?: string;
+    category?: string;
+  };
   productDetails?: string;
   isCredit?: boolean;
   paymentTerms?: PaymentTerms;

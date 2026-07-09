@@ -249,12 +249,12 @@ export function AddSaleModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label htmlFor="sale-quantity" className={LABEL_CLS}>Quantity</label>
-              <input id="sale-quantity" type="number" min={1} max={selectedInventoryItem?.currentStock || undefined} value={quantity} onChange={(e) => handleQuantityChange(Number.parseInt(e.target.value, 10) || 0)} className={`${INPUT_CLS} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`} />
+              <input id="sale-quantity" type="number" min={0.01} step="0.01" max={selectedInventoryItem?.currentStock || undefined} value={quantity} onChange={(e) => handleQuantityChange(Number(e.target.value) || 0)} className={`${INPUT_CLS} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`} />
               {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
             </div>
             <div className="space-y-2">
               <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA}){isHistoricalSale ? ' *' : ''}</label>
-              <input id="sale-amount" type="number" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: Number.parseInt(e.target.value, 10) || 0 })} className={`${INPUT_CLS} ${touched.amount && validationErrors.amount ? 'border-red-500' : ''}`} />
+              <input id="sale-amount" type="number" step="0.01" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: Number(e.target.value) || 0 })} className={`${INPUT_CLS} ${touched.amount && validationErrors.amount ? 'border-red-500' : ''}`} />
               {touched.amount && validationErrors.amount && <p className="text-xs text-red-500">{validationErrors.amount}</p>}
             </div>
           </div>
@@ -288,7 +288,7 @@ export function AddSaleModal({
           {paymentMode === PaymentMode.PARTIAL_CREDIT && (
             <div className="space-y-2">
               <label htmlFor="sale-amount-paid" className={LABEL_CLS}>Amount Paid Now ({NAIRA})</label>
-              <input id="sale-amount-paid" type="number" min={0} max={Number(newSale.amount) || undefined} value={amountPaid} onChange={(e) => setAmountPaid(Number.parseInt(e.target.value, 10) || 0)} className={INPUT_CLS} />
+              <input id="sale-amount-paid" type="number" step="0.01" min={0} max={Number(newSale.amount) || undefined} value={amountPaid} onChange={(e) => setAmountPaid(Number(e.target.value) || 0)} className={INPUT_CLS} />
               {Number(newSale.amount) > 0 && (
                 <p className="text-xs text-orange-600 font-medium">Balance on credit: {fmt(Math.max(0, Number(newSale.amount) - amountPaid))}</p>
               )}
