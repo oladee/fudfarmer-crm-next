@@ -13,6 +13,7 @@ import {
 } from './sales-utils';
 import type { DetailTab } from './sales-utils';
 import { SubmitButton } from '@/components/submit-button';
+import { PRODUCT_CATEGORIES } from '@/lib/product-categories';
 
 import type { HubScopeFilter } from '@/hooks/use-hub-scope';
 import type { Hub } from '@/types';
@@ -76,6 +77,8 @@ function OverviewTab({
   saleStockLogs, onVoidSale, voidingSale = false, can, isCompanyAdmin, hubScope, activeHubs,
 }: SaleDetailTabProps) {
   const currentItem = editForm.item ?? sale.item;
+  const currentCategory = currentItem?.category?.trim() ?? '';
+  const isCustomCategory = currentCategory !== '' && !PRODUCT_CATEGORIES.includes(currentCategory as (typeof PRODUCT_CATEGORIES)[number]);
 
   return (
     <>
@@ -184,9 +187,8 @@ function OverviewTab({
             </div>
             <div>
               <label className="text-xs text-muted-foreground">Category</label>
-              <input
-                type="text"
-                value={currentItem?.category || ''}
+              <select
+                value={currentCategory}
                 onChange={(e) =>
                   setEditForm({
                     ...editForm,
@@ -200,7 +202,15 @@ function OverviewTab({
                   })
                 }
                 className={`${INPUT_CLS} h-8 text-sm`}
-              />
+              >
+                <option value="">Select category</option>
+                {PRODUCT_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+                {isCustomCategory && (
+                  <option value={currentCategory}>{currentCategory} (existing)</option>
+                )}
+              </select>
             </div>
           </div>
         ) : (

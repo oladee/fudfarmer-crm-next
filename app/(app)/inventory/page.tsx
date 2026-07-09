@@ -13,6 +13,7 @@ import {
 } from '@/hooks/use-queries';
 import { InventoryItem, StockLog, StockMovementType } from '@/types';
 import type { InventoryImportPreviewRow } from '@/types/api';
+import { PRODUCT_CATEGORIES } from '@/lib/product-categories';
 import { InventoryImportModal } from './inventory-import-modal';
 import { toast } from 'sonner';
 import {
@@ -24,7 +25,6 @@ import {
 } from 'lucide-react';
 
 type ProductCategory = InventoryItem['category'];
-const ALL_CATEGORIES: ProductCategory[] = ['Fish', 'Chicken', 'Turkey', 'Beef & Exotic', 'Sausage', 'Palm Oil', 'Grains & Staples', 'Honey'];
 const ALL_UOMS: InventoryItem['unitOfMeasure'][] = ['Cartons', 'Units', 'Kg', 'Liters'];
 
 /* ────────────────── FIFO / FEFO helpers ────────────────── */
@@ -794,7 +794,7 @@ export default function InventoryPage() {
                   className="bg-transparent border-none text-sm font-medium focus:outline-none"
                 >
                   <option value="All">All Categories</option>
-                  {ALL_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <input type="file" accept=".xlsx" ref={importInputRef} className="hidden" onChange={handleInventoryImportFile} />
@@ -1365,7 +1365,7 @@ export default function InventoryPage() {
               <div className="space-y-2">
                 <label className={labelCls}>Category</label>
                 <select value={newProduct.category} onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value as ProductCategory })} className={inputCls}>
-                  {ALL_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                  {PRODUCT_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
                 </select>
               </div>
               <div className="space-y-2">
@@ -1443,7 +1443,7 @@ export default function InventoryPage() {
               <div className="space-y-2">
                 <label className={labelCls}>Category</label>
                 <select value={editProduct.category} onChange={(e) => setEditProduct({ ...editProduct, category: e.target.value as ProductCategory })} className={inputCls}>
-                  {ALL_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                  {PRODUCT_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
                 </select>
               </div>
               <div className="space-y-2">
