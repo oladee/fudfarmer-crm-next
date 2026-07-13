@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { CustomerType } from '@/types';
 
+import { PRODUCT_CATEGORY_COLORS } from '@/lib/product-categories';
+
 const NAIRA = '\u20A6';
 const fmt = (n: number) => `${NAIRA}${n.toLocaleString()}`;
 const fmtK = (n: number) => n >= 1_000_000 ? `${NAIRA}${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${NAIRA}${(n / 1000).toFixed(0)}k` : fmt(n);
@@ -29,11 +31,7 @@ const TT = {
   cursor: { fill: 'hsl(var(--muted))', opacity: 0.2 },
 };
 
-const CAT_COLORS: Record<string, string> = {
-  Fish: '#0891b2', Chicken: '#ea580c', Turkey: '#7c3aed',
-  'Beef & Exotic': '#dc2626', Sausage: '#ca8a04', 'Palm Oil': '#16a34a',
-  'Grains & Staples': '#2563eb', Honey: '#f59e0b', Other: '#6b7280',
-};
+const CAT_COLORS = PRODUCT_CATEGORY_COLORS;
 
 const CREDIT_COLORS = ['#f59e0b', '#ef4444', '#16a34a'];
 

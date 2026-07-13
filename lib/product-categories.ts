@@ -1,12 +1,47 @@
 import type { ProductCategory } from '@/types';
 
+/** Canonical product/sale categories — includes CRM CR sheet values + legacy catalog labels. */
 export const PRODUCT_CATEGORIES: ProductCategory[] = [
   'Fish',
+  'Seafood',
   'Chicken',
   'Turkey',
+  'Goat',
+  'Cow',
+  'Ram',
+  'Sheep',
   'Beef & Exotic',
   'Sausage',
   'Palm Oil',
+  'Oil and Spice',
+  'Grain',
+  'Flour',
+  'Tuber',
   'Grains & Staples',
   'Honey',
+  'Kitchen',
+  'Snacks',
 ];
+
+export const PRODUCT_CATEGORY_COLORS: Record<string, string> = {
+  Fish: '#0891b2',
+  Seafood: '#0e7490',
+  Chicken: '#ea580c',
+  Turkey: '#7c3aed',
+  Goat: '#b91c1c',
+  Cow: '#991b1b',
+  Ram: '#7f1d1d',
+  Sheep: '#9f1239',
+  'Beef & Exotic': '#dc2626',
+  Sausage: '#ca8a04',
+  'Palm Oil': '#16a34a',
+  'Oil and Spice': '#15803d',
+  Grain: '#2563eb',
+  Flour: '#3b82f6',
+  Tuber: '#1d4ed8',
+  'Grains & Staples': '#1e40af',
+  Honey: '#f59e0b',
+  Kitchen: '#db2777',
+  Snacks: '#a855f7',
+  Other: '#6b7280',
+};

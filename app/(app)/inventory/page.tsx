@@ -389,6 +389,10 @@ export default function InventoryPage() {
       toast.error('Please fill in SKU and Name.');
       return;
     }
+    if (newProduct.unitOfMeasure === 'Cartons' && !(newProduct.cartonWeight && newProduct.cartonWeight > 0)) {
+      toast.error('Carton weight (Kg) is required when unit of measure is Cartons.');
+      return;
+    }
     const existingSku = items.find((i) => i.sku.toLowerCase() === newProduct.sku!.toLowerCase());
     if (existingSku) {
       toast.error(`Duplicate SKU — "${newProduct.sku}" already exists (${existingSku.name}).`);
@@ -428,9 +432,16 @@ export default function InventoryPage() {
     const original = items.find((i) => i.id === editProduct.id);
     if (!original) return;
 
+    if (editProduct.unitOfMeasure === 'Cartons' && !(editProduct.cartonWeight && editProduct.cartonWeight > 0)) {
+      toast.error('Carton weight (Kg) is required when unit of measure is Cartons.');
+      return;
+    }
+
     if (editProduct.avgUnitCost && editProduct.baseSellingPrice && editProduct.avgUnitCost > editProduct.baseSellingPrice) {
       toast.warning('Warning: Cost exceeds selling price — negative margin!');
     }
+
+    const hub = activeHubs.find((h) => h.name === (editProduct.location || original.location));
 
     updateProduct.mutate({
       id: editProduct.id,
@@ -442,6 +453,7 @@ export default function InventoryPage() {
       avg_unit_cost: editProduct.avgUnitCost,
       carton_price: editProduct.cartonPrice,
       carton_weight: editProduct.cartonWeight,
+      ...(hub?.id ? { hub_id: hub.id } : {}),
     }, {
       onSuccess: (updated) => {
         if (viewingDetailsItem?.id === editProduct.id) setViewingDetailsItem(updated);
@@ -1395,8 +1407,18 @@ export default function InventoryPage() {
                 <input type="number" value={newProduct.cartonPrice || ''} onChange={(e) => setNewProduct({ ...newProduct, cartonPrice: parseInt(e.target.value) || undefined })} placeholder="Optional" className={inputCls} />
               </div>
               <div className="space-y-2">
-                <label className={labelCls}>Carton Weight (Kg)</label>
-                <input type="number" value={newProduct.cartonWeight || ''} onChange={(e) => setNewProduct({ ...newProduct, cartonWeight: parseFloat(e.target.value) || undefined })} placeholder="Optional" className={inputCls} />
+                <label className={labelCls}>
+                  Carton Weight (Kg){newProduct.unitOfMeasure === 'Cartons' ? ' *' : ''}
+                </label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step="0.01"
+                  value={newProduct.cartonWeight || ''}
+                  onChange={(e) => setNewProduct({ ...newProduct, cartonWeight: parseFloat(e.target.value) || undefined })}
+                  placeholder={newProduct.unitOfMeasure === 'Cartons' ? 'Required for Cartons' : 'Optional'}
+                  className={inputCls}
+                />
               </div>
               <div className="space-y-2 col-span-2">
                 <label className={labelCls}>Location Hub</label>
@@ -1479,8 +1501,18 @@ export default function InventoryPage() {
                 <input type="number" value={editProduct.cartonPrice ?? ''} onChange={(e) => setEditProduct({ ...editProduct, cartonPrice: parseInt(e.target.value) || undefined })} placeholder="Optional" className={inputCls} />
               </div>
               <div className="space-y-2">
-                <label className={labelCls}>Carton Weight (Kg)</label>
-                <input type="number" value={editProduct.cartonWeight ?? ''} onChange={(e) => setEditProduct({ ...editProduct, cartonWeight: parseFloat(e.target.value) || undefined })} placeholder="Optional" className={inputCls} />
+                <label className={labelCls}>
+                  Carton Weight (Kg){editProduct.unitOfMeasure === 'Cartons' ? ' *' : ''}
+                </label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step="0.01"
+                  value={editProduct.cartonWeight ?? ''}
+                  onChange={(e) => setEditProduct({ ...editProduct, cartonWeight: parseFloat(e.target.value) || undefined })}
+                  placeholder={editProduct.unitOfMeasure === 'Cartons' ? 'Required for Cartons' : 'Optional'}
+                  className={inputCls}
+                />
               </div>
             </div>
             {/* Margin warning */}

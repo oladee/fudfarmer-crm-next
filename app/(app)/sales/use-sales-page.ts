@@ -7,6 +7,7 @@ import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import {
   useSales,
+  useSalesSummary,
   useCreateSale,
   useUpdateSale,
   useUpdateDeliveryStatus,
@@ -64,7 +65,7 @@ export function useSalesPage() {
   const [filterChannel, setFilterChannel] = useState<string>('All');
   const [page, setPage] = useState(1);
 
-  const salesApiFilters = useMemo(
+  const summaryFilters = useMemo(
     () => ({
       hub_id: hubScope.hubIdForApi,
       ...(dateFrom ? { date_from: dateFrom } : {}),
@@ -76,8 +77,6 @@ export function useSalesPage() {
         ? { exclude_voided: true }
         : { status: filterStatus }),
       ...(filterChannel !== 'All' ? { channel: filterChannel } : {}),
-      page,
-      limit: SALES_PAGE_SIZE,
     }),
     [
       hubScope.hubIdForApi,
@@ -88,14 +87,23 @@ export function useSalesPage() {
       filterAgent,
       filterStatus,
       filterChannel,
-      page,
     ],
   );
 
-  const { data: salesList, isLoading: salesLoading, isFetching: salesFetching } = useSales(salesApiFilters);
+  const listFilters = useMemo(
+    () => ({
+      ...summaryFilters,
+      page,
+      limit: SALES_PAGE_SIZE,
+    }),
+    [summaryFilters, page],
+  );
+
+  const { data: salesList, isLoading: salesLoading, isFetching: salesFetching } = useSales(listFilters);
+  const { data: salesSummary } = useSalesSummary(summaryFilters);
   const sales = salesList?.items ?? [];
   const salesMeta = salesList?.meta ?? { page: 1, limit: SALES_PAGE_SIZE, total: 0, totalPages: 1 };
-  const kpis = salesList?.summary ?? {
+  const kpis = salesSummary ?? {
     revenue: 0,
     profit: 0,
     count: 0,
@@ -143,6 +151,7 @@ export function useSalesPage() {
     if (hubScope.defaultHubName) setSelectedHub(hubScope.defaultHubName);
   }, [hubScope.defaultHubName]);
   const [quantity, setQuantity] = useState(1);
+  const [saleUnit, setSaleUnit] = useState<'Carton' | 'Kg' | ''>('');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(PaymentMode.FULL_PAYMENT);
   const [paymentType, setPaymentType] = useState<PaymentType>(PaymentType.CASH);
   const [amountPaid, setAmountPaid] = useState(0);
@@ -227,6 +236,30 @@ export function useSalesPage() {
     [inventory, selectedProductId],
   );
 
+  const isCartonProduct = selectedInventoryItem?.unitOfMeasure === 'Cartons';
+
+  const computeSaleAmount = (item: typeof selectedInventoryItem, qty: number, unit: 'Carton' | 'Kg' | '') => {
+    if (!item || qty <= 0) return 0;
+    const cartonPrice = item.cartonPrice ?? item.baseSellingPrice;
+    if (item.unitOfMeasure === 'Cartons') {
+      if (unit === 'Kg') {
+        if (!item.cartonWeight || item.cartonWeight <= 0) return 0;
+        return (cartonPrice / item.cartonWeight) * qty;
+      }
+      return cartonPrice * qty;
+    }
+    return item.baseSellingPrice * qty;
+  };
+
+  const stockQtyForSale = (item: typeof selectedInventoryItem, qty: number, unit: 'Carton' | 'Kg' | '') => {
+    if (!item || qty <= 0) return 0;
+    if (item.unitOfMeasure === 'Cartons' && unit === 'Kg') {
+      if (!item.cartonWeight || item.cartonWeight <= 0) return Infinity;
+      return qty / item.cartonWeight;
+    }
+    return qty;
+  };
+
   const [productDetailsText, setProductDetailsText] = useState('');
 
   const saleDateStr = newSale.date || new Date().toISOString().split('T')[0];
@@ -238,8 +271,15 @@ export function useSalesPage() {
     if (!isHistoricalSale) {
       if (!selectedProductId) errors.productId = 'Product is required.';
       if (quantity <= 0) errors.quantity = 'Quantity must be greater than 0.';
-      if (selectedInventoryItem && quantity > selectedInventoryItem.currentStock) {
-        errors.quantity = `Exceeds stock (${selectedInventoryItem.currentStock}).`;
+      if (isCartonProduct) {
+        if (!saleUnit) errors.saleUnit = 'Select Carton or Kg.';
+        if (!selectedInventoryItem?.cartonWeight || selectedInventoryItem.cartonWeight <= 0) {
+          errors.saleUnit = 'Set carton weight on this product before recording a sale.';
+        }
+      }
+      const needed = stockQtyForSale(selectedInventoryItem, quantity, saleUnit);
+      if (selectedInventoryItem && needed > selectedInventoryItem.currentStock) {
+        errors.quantity = `Exceeds stock (${selectedInventoryItem.currentStock} ${selectedInventoryItem.unitOfMeasure}).`;
       }
     } else {
       if (!selectedProductId && !productDetailsText.trim()) {
@@ -258,7 +298,9 @@ export function useSalesPage() {
     newSale.amount,
     selectedProductId,
     quantity,
+    saleUnit,
     selectedInventoryItem,
+    isCartonProduct,
     paymentMode,
     dueDate,
     isHistoricalSale,
@@ -322,11 +364,13 @@ export function useSalesPage() {
     setSelectedProductId(productId);
     setTouched((t) => ({ ...t, productId: true }));
     const item = inventory.find((i) => i.id === productId);
+    const nextUnit: 'Carton' | 'Kg' | '' = item?.unitOfMeasure === 'Cartons' ? 'Carton' : '';
+    setSaleUnit(nextUnit);
     if (item) {
       setNewSale((prev) => ({
         ...prev,
-        amount: item.baseSellingPrice * quantity,
-        productDetails: `${quantity} ${item.unitOfMeasure} of ${item.name}`,
+        amount: computeSaleAmount(item, quantity, nextUnit),
+        productDetails: `${quantity} ${nextUnit || item.unitOfMeasure} of ${item.name}`,
       }));
     }
   };
@@ -338,8 +382,21 @@ export function useSalesPage() {
     if (item) {
       setNewSale((prev) => ({
         ...prev,
-        amount: item.baseSellingPrice * qty,
-        productDetails: `${qty} ${item.unitOfMeasure} of ${item.name}`,
+        amount: computeSaleAmount(item, qty, saleUnit),
+        productDetails: `${qty} ${saleUnit || item.unitOfMeasure} of ${item.name}`,
+      }));
+    }
+  };
+
+  const handleSaleUnitChange = (unit: 'Carton' | 'Kg' | '') => {
+    setSaleUnit(unit);
+    setTouched((t) => ({ ...t, saleUnit: true }));
+    const item = inventory.find((i) => i.id === selectedProductId);
+    if (item) {
+      setNewSale((prev) => ({
+        ...prev,
+        amount: computeSaleAmount(item, quantity, unit),
+        productDetails: `${quantity} ${unit || item.unitOfMeasure} of ${item.name}`,
       }));
     }
   };
@@ -357,6 +414,7 @@ export function useSalesPage() {
     });
     setSelectedProductId('');
     setQuantity(1);
+    setSaleUnit('');
     setPaymentMode(PaymentMode.FULL_PAYMENT);
     setPaymentType(PaymentType.CASH);
     setAmountPaid(0);
@@ -376,7 +434,7 @@ export function useSalesPage() {
       dueDate: true,
       ...(isHistoricalSale
         ? { productDetails: true, amount: true }
-        : { productId: true, quantity: true }),
+        : { productId: true, quantity: true, saleUnit: true }),
     };
     setTouched(touchFields);
     if (!isFormValid) {
@@ -386,7 +444,8 @@ export function useSalesPage() {
 
     const inventoryItem = inventory.find((i) => i.id === selectedProductId);
     if (!isHistoricalSale) {
-      if (!inventoryItem || inventoryItem.currentStock < quantity) {
+      const needed = stockQtyForSale(inventoryItem, quantity, saleUnit);
+      if (!inventoryItem || needed > inventoryItem.currentStock) {
         toast.error(`Insufficient stock in ${selectedHub}.`);
         return;
       }
@@ -404,6 +463,23 @@ export function useSalesPage() {
       return;
     }
 
+    const saleItemPayload =
+      selectedProductId && quantity > 0
+        ? {
+            item: {
+              product_id: selectedProductId,
+              quantity,
+              ...(saleUnit
+                ? { sale_unit: saleUnit, unit: saleUnit }
+                : inventoryItem
+                  ? { unit: inventoryItem.unitOfMeasure }
+                  : {}),
+            },
+          }
+        : isHistoricalSale && productDetailsText.trim()
+          ? { item: { product_name: productDetailsText.trim(), quantity: quantity > 0 ? quantity : 1 } }
+          : {};
+
     createSale.mutate(
       {
         customer_id: newSale.customerId!,
@@ -420,11 +496,7 @@ export function useSalesPage() {
         notes: newSale.notes || undefined,
         ...(isAdmin ? { profit_margin: profitMargin, profit_amount: profitAmount } : {}),
         date: saleDate,
-        ...(selectedProductId && quantity > 0
-          ? { item: { product_id: selectedProductId, quantity } }
-          : isHistoricalSale && productDetailsText.trim()
-            ? { item: { product_name: productDetailsText.trim(), quantity: quantity > 0 ? quantity : 1 } }
-            : {}),
+        ...saleItemPayload,
       },
       {
         onSuccess: (result) => {
@@ -694,7 +766,8 @@ export function useSalesPage() {
     quickPreset,
     setQuickPreset,
     applyPreset,
-    salesApiFilters,
+    listFilters,
+    summaryFilters,
     sales,
     salesMeta,
     salesLoading,
@@ -737,6 +810,7 @@ export function useSalesPage() {
     selectedProductId,
     setSelectedProductId,
     quantity,
+    saleUnit,
     paymentMode,
     setPaymentMode,
     paymentType,
@@ -756,8 +830,10 @@ export function useSalesPage() {
     selectedFormCustomer,
     availableInventory,
     selectedInventoryItem,
+    isCartonProduct,
     handleProductChange,
     handleQuantityChange,
+    handleSaleUnitChange,
     handleSaveSale,
     resetForm,
     showImportModal,

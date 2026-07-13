@@ -143,13 +143,24 @@ export const PREDEFINED_SEGMENTS = [
 
 export type ProductCategory =
   | 'Fish'
+  | 'Seafood'
   | 'Chicken'
   | 'Turkey'
+  | 'Goat'
+  | 'Cow'
+  | 'Ram'
+  | 'Sheep'
   | 'Beef & Exotic'
   | 'Sausage'
   | 'Palm Oil'
+  | 'Oil and Spice'
+  | 'Grain'
+  | 'Flour'
+  | 'Tuber'
   | 'Grains & Staples'
-  | 'Honey';
+  | 'Honey'
+  | 'Kitchen'
+  | 'Snacks';
 
 export interface InventoryItem {
   id: string;
@@ -335,6 +346,8 @@ export interface Sale {
     productName?: string;
     quantity: number;
     unit?: string;
+    saleUnit?: 'Carton' | 'Kg';
+    stockQuantity?: number;
     category?: string;
   };
   productDetails?: string;

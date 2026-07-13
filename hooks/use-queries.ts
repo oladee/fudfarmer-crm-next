@@ -739,21 +739,23 @@ export function useDeleteSegment() {
 }
 
 // --- Sales ---
+type SalesQueryFilters = {
+  status?: string;
+  date_from?: string;
+  date_to?: string;
+  date_field?: string;
+  payment_mode?: string;
+  hub_id?: string;
+  agent_id?: string;
+  channel?: string;
+  search?: string;
+  exclude_voided?: boolean;
+  page?: number;
+  limit?: number;
+};
+
 export function useSales(
-  filters?: {
-    status?: string;
-    date_from?: string;
-    date_to?: string;
-    date_field?: string;
-    payment_mode?: string;
-    hub_id?: string;
-    agent_id?: string;
-    channel?: string;
-    search?: string;
-    exclude_voided?: boolean;
-    page?: number;
-    limit?: number;
-  },
+  filters?: SalesQueryFilters,
   options?: UseQueryEnabledOptions,
 ) {
   return useQuery({
@@ -779,6 +781,37 @@ export function useSales(
       };
       const raw = await axiosGet(`sales${buildQuery(params)}`, true);
       return parseSalesListResponse(raw, hubMap);
+    },
+  });
+}
+
+/** KPI summary only — omits page so paging the table does not refetch metrics. */
+export function useSalesSummary(
+  filters?: Omit<SalesQueryFilters, 'page' | 'limit'>,
+  options?: UseQueryEnabledOptions,
+) {
+  return useQuery({
+    queryKey: ['sales-summary', filters],
+    enabled: options?.enabled ?? true,
+    queryFn: async (): Promise<SalesListSummary> => {
+      if (!HAS_API) return EMPTY_SALES_LIST.summary;
+      const hubMap = await fetchHubMap();
+      const params: Record<string, string | number | boolean | undefined> = {
+        status: filters?.status,
+        date_from: filters?.date_from,
+        date_to: filters?.date_to,
+        date_field: filters?.date_field,
+        payment_mode: filters?.payment_mode,
+        hub_id: filters?.hub_id,
+        agent_id: filters?.agent_id,
+        channel: filters?.channel,
+        search: filters?.search,
+        exclude_voided: filters?.exclude_voided,
+        page: 1,
+        limit: 1,
+      };
+      const raw = await axiosGet(`sales${buildQuery(params)}`, true);
+      return parseSalesListResponse(raw, hubMap).summary;
     },
   });
 }
@@ -818,6 +851,7 @@ export function useCreateSale() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales-summary'] });
       qc.invalidateQueries({ queryKey: ['customers'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
       qc.invalidateQueries({ queryKey: ['stockLogs'] });
@@ -835,7 +869,10 @@ export function useUpdateSale() {
       const hubMap = await fetchHubMap();
       return mapSale(res.data, hubMap);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales-summary'] });
+    },
   });
 }
 
@@ -846,7 +883,10 @@ export function useUpdateSaleStatus() {
       const res = await axiosPatch(`sales/${id}/status`, { status }, true) as ApiListResponse<ApiSale>;
       return mapSale(res.data);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales-summary'] });
+    },
   });
 }
 
@@ -857,7 +897,10 @@ export function useUpdateDeliveryStatus() {
       const res = await axiosPatch(`sales/${id}/delivery`, { delivery_status, delivery_address }, true) as ApiListResponse<ApiSale>;
       return mapSale(res.data);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales-summary'] });
+    },
   });
 }
 
@@ -870,6 +913,7 @@ export function useVoidSale() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['sales-summary'] });
       qc.invalidateQueries({ queryKey: ['customers'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
       qc.invalidateQueries({ queryKey: ['stockLogs'] });
@@ -880,6 +924,7 @@ export function useVoidSale() {
 
 function invalidateSalesImportQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['sales'] });
+  qc.invalidateQueries({ queryKey: ['sales-summary'] });
   qc.invalidateQueries({ queryKey: ['customers'] });
   qc.invalidateQueries({ queryKey: ['inventory'] });
   qc.invalidateQueries({ queryKey: ['stockLogs'] });

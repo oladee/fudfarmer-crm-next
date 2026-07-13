@@ -45,6 +45,9 @@ export interface AddSaleModalProps {
   selectedInventoryItem: InventoryItem | undefined;
   quantity: number;
   handleQuantityChange: (qty: number) => void;
+  saleUnit: 'Carton' | 'Kg' | '';
+  handleSaleUnitChange: (unit: 'Carton' | 'Kg' | '') => void;
+  isCartonProduct: boolean;
   paymentMode: PaymentMode;
   setPaymentMode: (mode: PaymentMode) => void;
   amountPaid: number;
@@ -87,6 +90,9 @@ export function AddSaleModal({
   selectedInventoryItem,
   quantity,
   handleQuantityChange,
+  saleUnit,
+  handleSaleUnitChange,
+  isCartonProduct,
   paymentMode,
   setPaymentMode,
   amountPaid,
@@ -237,7 +243,10 @@ export function AddSaleModal({
                 <span className={`font-medium ${selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel ? 'text-red-600' : 'text-green-600'}`}>
                   {selectedInventoryItem.currentStock} {selectedInventoryItem.unitOfMeasure} in stock
                 </span>
-                <span>&middot; {fmt(selectedInventoryItem.baseSellingPrice)}/{selectedInventoryItem.unitOfMeasure}</span>
+                {isCartonProduct && selectedInventoryItem.cartonWeight ? (
+                  <span>&middot; {selectedInventoryItem.cartonWeight} Kg / carton</span>
+                ) : null}
+                <span>&middot; {fmt(selectedInventoryItem.cartonPrice ?? selectedInventoryItem.baseSellingPrice)}/{isCartonProduct ? 'Carton' : selectedInventoryItem.unitOfMeasure}</span>
                 {selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel && (
                   <span className="text-red-500 font-medium flex items-center gap-1"><AlertTriangle size={10} /> Low stock</span>
                 )}
@@ -245,12 +254,45 @@ export function AddSaleModal({
             )}
           </div>
 
-          {/* Quantity & Amount */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Quantity, sale unit & Amount */}
+          <div className={`grid grid-cols-1 ${isCartonProduct ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
+            {isCartonProduct && (
+              <div className="space-y-2">
+                <label htmlFor="sale-unit" className={LABEL_CLS}>Unit *</label>
+                <select
+                  id="sale-unit"
+                  value={saleUnit}
+                  onChange={(e) => handleSaleUnitChange((e.target.value as 'Carton' | 'Kg' | '') || '')}
+                  className={`${INPUT_CLS} ${touched.saleUnit && validationErrors.saleUnit ? 'border-red-500' : ''}`}
+                >
+                  <option value="">-- Select --</option>
+                  <option value="Carton">Carton</option>
+                  <option value="Kg">Kg</option>
+                </select>
+                {touched.saleUnit && validationErrors.saleUnit && (
+                  <p className="text-xs text-red-500">{validationErrors.saleUnit}</p>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
-              <label htmlFor="sale-quantity" className={LABEL_CLS}>Quantity</label>
-              <input id="sale-quantity" type="number" min={0.01} step="0.01" max={selectedInventoryItem?.currentStock || undefined} value={quantity} onChange={(e) => handleQuantityChange(Number(e.target.value) || 0)} className={`${INPUT_CLS} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`} />
+              <label htmlFor="sale-quantity" className={LABEL_CLS}>
+                Quantity{saleUnit ? ` (${saleUnit})` : ''}
+              </label>
+              <input
+                id="sale-quantity"
+                type="number"
+                min={0.01}
+                step="0.01"
+                value={quantity}
+                onChange={(e) => handleQuantityChange(Number(e.target.value) || 0)}
+                className={`${INPUT_CLS} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`}
+              />
               {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
+              {isCartonProduct && saleUnit === 'Kg' && selectedInventoryItem?.cartonWeight ? (
+                <p className="text-xs text-muted-foreground">
+                  Deducts {(quantity / selectedInventoryItem.cartonWeight).toFixed(4)} cartons from stock
+                </p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA}){isHistoricalSale ? ' *' : ''}</label>
@@ -261,10 +303,27 @@ export function AddSaleModal({
           {/* Live price breakdown */}
           {selectedInventoryItem && quantity > 0 && (
             <div className="text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2 flex items-center gap-3 flex-wrap">
-              <span>{quantity} &times; {fmt(selectedInventoryItem.baseSellingPrice)} = <span className="font-medium text-foreground">{fmt(selectedInventoryItem.baseSellingPrice * quantity)}</span></span>
-              {Number(newSale.amount) !== selectedInventoryItem.baseSellingPrice * quantity && (
-                <span className="text-orange-600 font-medium">Custom price applied ({fmt(Number(newSale.amount))})</span>
-              )}
+              {(() => {
+                const unitPrice =
+                  isCartonProduct && saleUnit === 'Kg' && selectedInventoryItem.cartonWeight
+                    ? (selectedInventoryItem.cartonPrice ?? selectedInventoryItem.baseSellingPrice) /
+                      selectedInventoryItem.cartonWeight
+                    : isCartonProduct
+                      ? (selectedInventoryItem.cartonPrice ?? selectedInventoryItem.baseSellingPrice)
+                      : selectedInventoryItem.baseSellingPrice;
+                const suggested = unitPrice * quantity;
+                return (
+                  <>
+                    <span>
+                      {quantity} {saleUnit || selectedInventoryItem.unitOfMeasure} &times; {fmt(unitPrice)} ={' '}
+                      <span className="font-medium text-foreground">{fmt(suggested)}</span>
+                    </span>
+                    {Number(newSale.amount) !== suggested && (
+                      <span className="text-orange-600 font-medium">Custom price applied ({fmt(Number(newSale.amount))})</span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
 

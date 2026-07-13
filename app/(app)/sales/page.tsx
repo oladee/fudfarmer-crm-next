@@ -91,12 +91,12 @@ export default function SalesPage() {
     saleStockLogs, customerSalesHistory, closeDetailPanel,
     handleUpdateDeliveryStatus, startEditing, saveEdit, handleVoidSale,
     showAddModal, setShowAddModal, newSale, setNewSale, selectedHub, setSelectedHub,
-    selectedProductId, setSelectedProductId, quantity, paymentMode, setPaymentMode,
+    selectedProductId, setSelectedProductId, quantity, saleUnit, paymentMode, setPaymentMode,
     paymentType, setPaymentType, amountPaid, setAmountPaid, dueDate, setDueDate,
     touched, setTouched, validationErrors, isFormValid, isHistoricalSale,
     productDetailsText, setProductDetailsText, customerCreditWarning,
-    selectedFormCustomer, availableInventory, selectedInventoryItem,
-    handleProductChange, handleQuantityChange, handleSaveSale,
+    selectedFormCustomer, availableInventory, selectedInventoryItem, isCartonProduct,
+    handleProductChange, handleQuantityChange, handleSaleUnitChange, handleSaveSale,
     savingSale, savingEdit, voidingSale, updatingDelivery,
     showImportModal, setShowImportModal, importPreview, setImportPreview, importSummary, setImportSummary,
     validateAuditId, importing, importProgress, importResult, showImportConfirm, setShowImportConfirm,
@@ -383,6 +383,9 @@ export default function SalesPage() {
         selectedInventoryItem={selectedInventoryItem}
         quantity={quantity}
         handleQuantityChange={handleQuantityChange}
+        saleUnit={saleUnit}
+        handleSaleUnitChange={handleSaleUnitChange}
+        isCartonProduct={isCartonProduct}
         paymentMode={paymentMode}
         setPaymentMode={setPaymentMode}
         amountPaid={amountPaid}

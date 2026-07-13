@@ -18,6 +18,7 @@ import {
   Truck, AlertTriangle, ChevronRight,
 } from 'lucide-react';
 import { PaymentMode, PaymentType } from '@/types';
+import { PRODUCT_CATEGORY_COLORS } from '@/lib/product-categories';
 
 const NAIRA = '\u20A6';
 const fmt = (n: number) => `${NAIRA}${n.toLocaleString()}`;
@@ -30,11 +31,7 @@ const TT = {
 };
 
 const CHART_COLORS = ['#0891b2', '#ea580c', '#7c3aed', '#dc2626', '#ca8a04', '#16a34a', '#2563eb', '#f59e0b', '#ec4899', '#6b7280'];
-const CAT_COLORS: Record<string, string> = {
-  Fish: '#0891b2', Chicken: '#ea580c', Turkey: '#7c3aed',
-  'Beef & Exotic': '#dc2626', Sausage: '#ca8a04', 'Palm Oil': '#16a34a',
-  'Grains & Staples': '#2563eb', Honey: '#f59e0b', Other: '#6b7280',
-};
+const CAT_COLORS = PRODUCT_CATEGORY_COLORS;
 
 type AnalyticsTab = 'sales' | 'products' | 'customers' | 'credit';
 

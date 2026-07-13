@@ -169,6 +169,8 @@ export interface ApiSaleItem {
   product_name?: string;
   quantity: number;
   unit?: string;
+  sale_unit?: 'Carton' | 'Kg';
+  stock_quantity?: number;
   category?: string;
 }
 
