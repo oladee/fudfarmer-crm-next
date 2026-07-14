@@ -33,7 +33,7 @@ export const BACKEND_MODULE_SUBMODULES: Record<string, string[]> = {
   credit: ['view_credit', 'record_payment', 'set_due_date'],
   interactions: ['view_interactions', 'log_interaction', 'resolve_interaction'],
   audit_trail: ['view_audit_trail'],
-  settings: ['manage_users', 'manage_hubs', 'manage_roles'],
+  settings: ['manage_users', 'manage_hubs', 'view_all_hubs', 'manage_roles'],
 };
 
 type ApiSubModule = { name: string; enabled: boolean };

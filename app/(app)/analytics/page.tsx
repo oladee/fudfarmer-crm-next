@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAnalyticsOverview } from '@/hooks/use-queries';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
+import { MetricsPeriodBar, useMetricsPeriod } from '@/components/metrics-period-bar';
 import { HAS_API } from '@/lib/require-api';
 import type { AnalyticsOverviewData } from '@/types/api';
 import {
@@ -44,7 +45,11 @@ export default function AnalyticsPage() {
   const router = useRouter();
   const [tab, setTab] = useState<AnalyticsTab>('sales');
   const hubScope = useHubScopeFilter();
-  const { data: overview, isLoading } = useAnalyticsOverview({ hub_id: hubScope.hubIdForApi });
+  const metricsPeriod = useMetricsPeriod('month');
+  const { data: overview, isLoading } = useAnalyticsOverview({
+    hub_id: hubScope.hubIdForApi,
+    ...metricsPeriod.apiParams,
+  });
 
   const tabs: { key: AnalyticsTab; label: string; icon: React.ElementType }[] = [
     { key: 'sales', label: 'Sales Analysis', icon: TrendingUp },
@@ -63,7 +68,10 @@ export default function AnalyticsPage() {
         <p className="text-sm text-muted-foreground">Deeper insights into FudFarmer operations</p>
       </div>
 
-      <HubScopeFilterBar scope={hubScope} />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <HubScopeFilterBar scope={hubScope} />
+        <MetricsPeriodBar period={metricsPeriod} />
+      </div>
 
       {!HAS_API ? (
         <div className="rounded-xl border bg-card p-8 shadow-sm text-center">

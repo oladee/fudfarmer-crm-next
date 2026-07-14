@@ -348,13 +348,21 @@ export function useWhoAmI() {
   });
 }
 
-export function useAnalyticsOverview(filters?: { hub_id?: string }) {
+export function useAnalyticsOverview(filters?: {
+  hub_id?: string;
+  period?: string;
+  date_from?: string;
+  date_to?: string;
+}) {
   return useQuery({
     queryKey: ['analyticsOverview', filters],
     queryFn: async () => {
       if (!HAS_API) return EMPTY_ANALYTICS_OVERVIEW;
       const params = new URLSearchParams();
       if (filters?.hub_id) params.set('hub_id', filters.hub_id);
+      if (filters?.period) params.set('period', filters.period);
+      if (filters?.date_from) params.set('date_from', filters.date_from);
+      if (filters?.date_to) params.set('date_to', filters.date_to);
       const qs = params.toString();
       const path = qs ? `analytics/overview?${qs}` : 'analytics/overview';
       const res = await axiosGet(path, true) as ApiResponse<AnalyticsOverviewData>;
@@ -604,6 +612,9 @@ export function useCustomers(filters?: {
   segment_id?: string;
   type?: string;
   hub_id?: string;
+  period?: string;
+  date_from?: string;
+  date_to?: string;
   page?: number;
   limit?: number;
 }, options?: { enabled?: boolean }) {
@@ -625,6 +636,9 @@ export function useCustomers(filters?: {
         customer_type: filters?.type ? customerTypeToApi(filters.type) : undefined,
         hub_id: filters?.hub_id,
         segment_id: filters?.segment_id,
+        period: filters?.period,
+        date_from: filters?.date_from,
+        date_to: filters?.date_to,
         page: filters?.page,
         limit: filters?.limit,
       };
@@ -1135,7 +1149,12 @@ export function useInventory(filters?: { hub_id?: string; category?: string; low
   });
 }
 
-export function useInventorySalesMetrics(filters?: { hub_id?: string }) {
+export function useInventorySalesMetrics(filters?: {
+  hub_id?: string;
+  period?: string;
+  date_from?: string;
+  date_to?: string;
+}) {
   return useQuery({
     queryKey: ['inventory-sales-metrics', filters],
     queryFn: async (): Promise<InventorySalesMetrics> => {
@@ -1147,7 +1166,12 @@ export function useInventorySalesMetrics(filters?: { hub_id?: string }) {
           mealsServed: 0,
         };
       }
-      const params: Record<string, string | undefined> = { hub_id: filters?.hub_id };
+      const params: Record<string, string | undefined> = {
+        hub_id: filters?.hub_id,
+        period: filters?.period,
+        date_from: filters?.date_from,
+        date_to: filters?.date_to,
+      };
       const res = await axiosGet(
         `inventory/sales-metrics${buildQuery(params)}`,
         true,

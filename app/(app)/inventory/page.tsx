@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
+import { MetricsPeriodBar, useMetricsPeriod } from '@/components/metrics-period-bar';
 import { SubmitButton } from '@/components/submit-button';
 import { usePermissions } from '@/hooks/use-permissions';
 import {
@@ -163,13 +164,17 @@ export default function InventoryPage() {
   const { user } = useAuth();
   const { can, isAdmin } = usePermissions();
   const hubScope = useHubScopeFilter();
+  const metricsPeriod = useMetricsPeriod('month');
   const importInputRef = useRef<HTMLInputElement>(null);
   const downloadInventoryTemplate = useDownloadInventoryImportTemplate();
   const validateInventoryImport = useValidateInventoryImport();
   const importInventory = useImportInventory();
   const { data: items = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
   const { data: logs = [] } = useStockLogs({ hub_id: hubScope.hubIdForApi });
-  const { data: salesMetrics } = useInventorySalesMetrics({ hub_id: hubScope.hubIdForApi });
+  const { data: salesMetrics } = useInventorySalesMetrics({
+    hub_id: hubScope.hubIdForApi,
+    ...metricsPeriod.apiParams,
+  });
   const volumeChartData = useMemo(
     () => [
       { unit: 'Kg', quantity: salesMetrics?.volumeByUnit.Kg ?? 0 },
@@ -758,7 +763,10 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <HubScopeFilterBar scope={hubScope} />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <HubScopeFilterBar scope={hubScope} />
+        <MetricsPeriodBar period={metricsPeriod} />
+      </div>
 
       {/* ── Alerts ── */}
       {lowStockItems.length > 0 && activeView === 'Products' && (

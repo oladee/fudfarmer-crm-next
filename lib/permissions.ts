@@ -30,6 +30,7 @@ export const ALL_PERMISSIONS = [
   'audit.view',
   'settings.manage_users',
   'settings.manage_hubs',
+  'settings.view_all_hubs',
   'settings.manage_roles',
   'settings.reset_data',
 ] as const;
@@ -123,6 +124,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     permissions: [
       { key: 'settings.manage_users', label: 'Add, edit & remove users' },
       { key: 'settings.manage_hubs', label: 'Manage hub locations' },
+      { key: 'settings.view_all_hubs', label: 'View all hubs (company-wide data)' },
       { key: 'settings.manage_roles', label: 'Configure roles & permissions' },
       { key: 'settings.reset_data', label: 'Reset all data' },
     ],
@@ -158,6 +160,7 @@ export const PERMISSION_MAP: Record<Permission, string> = {
   'audit.view': 'view_audit_trail',
   'settings.manage_users': 'manage_users',
   'settings.manage_hubs': 'manage_hubs',
+  'settings.view_all_hubs': 'view_all_hubs',
   'settings.manage_roles': 'manage_roles',
   'settings.reset_data': 'manage_users',
 };

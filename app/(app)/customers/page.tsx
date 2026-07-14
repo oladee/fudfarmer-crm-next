@@ -23,6 +23,7 @@ import { isPlaceholderEmail, isB2bCustomerType, customerPhoneForApi } from '@/li
 import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
+import { MetricsPeriodBar, useMetricsPeriod } from '@/components/metrics-period-bar';
 import { SubmitButton } from '@/components/submit-button';
 import { PaginationControls } from '@/components/ui/pagination-controls';
 import { MetricValue } from '@/components/ui/metric-value';
@@ -90,6 +91,7 @@ export default function CustomersPage() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const hubScope = useHubScopeFilter();
+  const metricsPeriod = useMetricsPeriod('month');
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<CustomerType | 'All'>('All');
@@ -110,7 +112,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, filterType, filterSegment, hubScope.hubIdForApi]);
+  }, [debouncedSearch, filterType, filterSegment, hubScope.hubIdForApi, metricsPeriod.apiParams]);
 
   const { data: customerList, isLoading: customersLoading, isFetching: customersFetching } = useCustomers({
     search: debouncedSearch || undefined,
@@ -119,10 +121,12 @@ export default function CustomersPage() {
     segment_id: segmentId,
     page,
     limit: CUSTOMERS_PAGE_SIZE,
+    ...metricsPeriod.apiParams,
   });
   const customers = customerList?.items ?? [];
   const tableLoading = customersLoading || customersFetching;
   const customerMeta = customerList?.meta ?? { page: 1, limit: CUSTOMERS_PAGE_SIZE, total: 0, totalPages: 1 };
+  const periodScoped = metricsPeriod.isCustom || metricsPeriod.preset !== 'all';
   const kpis = customerList?.summary ?? {
     total: 0,
     b2b: 0,
@@ -501,20 +505,22 @@ export default function CustomersPage() {
       </div>
 
       {/* KPI Cards */}
+      <div className="space-y-3">
+        <MetricsPeriodBar period={metricsPeriod} />
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><Users size={14} className="text-muted-foreground" /><span className="text-[10px] font-bold uppercase text-muted-foreground">Total</span></div>
           <MetricValue value={kpis.total} />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-1"><Calendar size={14} className="text-sky-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">YTD Customers</span></div>
+          <div className="flex items-center gap-2 mb-1"><Calendar size={14} className="text-sky-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">{periodScoped ? 'Joined in Period' : 'YTD Customers'}</span></div>
           <MetricValue value={kpis.ytdCustomers} />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-1"><Plus size={14} className="text-teal-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">New This Month</span></div>
+          <div className="flex items-center gap-2 mb-1"><Plus size={14} className="text-teal-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">{periodScoped ? 'New in Period' : 'New This Month'}</span></div>
           <MetricValue value={kpis.newThisMonth} />
           <p className={`mt-1 text-[10px] font-semibold ${kpis.newCustomersMomPct > 0 ? 'text-emerald-600' : kpis.newCustomersMomPct < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
-            {kpis.newCustomersMomPct > 0 ? '+' : ''}{kpis.newCustomersMomPct.toFixed(1)}% MoM
+            {kpis.newCustomersMomPct > 0 ? '+' : ''}{kpis.newCustomersMomPct.toFixed(1)}% vs prior
           </p>
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
@@ -541,6 +547,7 @@ export default function CustomersPage() {
           <div className="flex items-center gap-2 mb-1"><BarChart3 size={14} className="text-orange-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">Avg Value</span></div>
           <MetricValue value={`₦${Math.round(kpis.avgValue).toLocaleString()}`} className="text-lg" />
         </div>
+      </div>
       </div>
 
       {/* Filters */}
