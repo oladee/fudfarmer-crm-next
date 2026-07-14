@@ -811,7 +811,7 @@ export default function InventoryPage() {
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis dataKey="unit" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: number) => value.toLocaleString()} />
+                <Tooltip formatter={(value) => Number(value ?? 0).toLocaleString()} />
                 <Bar dataKey="quantity" radius={[4, 4, 0, 0]}>
                   {volumeChartData.map((_, idx) => (
                     <Cell key={idx} fill={['#0891b2', '#16a34a', '#7c3aed'][idx % 3]} />
