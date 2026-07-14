@@ -16,7 +16,7 @@ export function MetricValue({ value, className = '' }: MetricValueProps) {
   const text = String(value ?? '—');
   return (
     <p
-      className={`${valueSizeClass(text)} font-black leading-tight break-words ${className}`.trim()}
+      className={`${valueSizeClass(text)} font-black leading-tight whitespace-nowrap overflow-hidden text-ellipsis ${className}`.trim()}
       title={text}
     >
       {text}

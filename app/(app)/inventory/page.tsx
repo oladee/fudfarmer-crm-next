@@ -775,7 +775,7 @@ export default function InventoryPage() {
       )}
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
         {[
           { label: 'Inventory Value (Cost)', value: `\u20A6${inventoryValue.toLocaleString()}`, icon: <BarChart4 size={14} />, color: 'text-primary', sub: null as string | null },
           { label: 'Total Active SKUs', value: filteredItems.length, icon: <Package size={14} />, color: 'text-blue-600', sub: null },

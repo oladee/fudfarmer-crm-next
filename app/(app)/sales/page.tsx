@@ -202,7 +202,7 @@ export default function SalesPage() {
         </div>
       </div>
 
-      <div className={`grid grid-cols-2 md:grid-cols-3 gap-4 ${isAdmin ? 'lg:grid-cols-6' : 'lg:grid-cols-5'}`}>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {kpiCards.map((kpi) => (
           <div key={kpi.label} className="rounded-md border bg-card p-4">
             <div className={`flex items-center gap-2 mb-1 ${kpi.color}`}>
