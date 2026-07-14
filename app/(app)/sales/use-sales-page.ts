@@ -261,6 +261,8 @@ export function useSalesPage() {
   };
 
   const [productDetailsText, setProductDetailsText] = useState('');
+  const MEAL_PRODUCT_ID = '__meal__';
+  const isMealSale = selectedProductId === MEAL_PRODUCT_ID;
 
   const saleDateStr = newSale.date || new Date().toISOString().split('T')[0];
   const isHistoricalSale = isHistoricalDate(saleDateStr);
@@ -268,7 +270,11 @@ export function useSalesPage() {
   const validationErrors = useMemo(() => {
     const errors: Record<string, string> = {};
     if (!newSale.customerId) errors.customerId = 'Customer is required.';
-    if (!isHistoricalSale) {
+    if (isMealSale) {
+      if (!productDetailsText.trim()) errors.productDetails = 'Meal name is required.';
+      if (quantity <= 0) errors.quantity = 'Quantity must be greater than 0.';
+      if (!newSale.amount || newSale.amount <= 0) errors.amount = 'Amount is required for meal sales.';
+    } else if (!isHistoricalSale) {
       if (!selectedProductId) errors.productId = 'Product is required.';
       if (quantity <= 0) errors.quantity = 'Quantity must be greater than 0.';
       if (isCartonProduct) {
@@ -304,6 +310,7 @@ export function useSalesPage() {
     paymentMode,
     dueDate,
     isHistoricalSale,
+    isMealSale,
     productDetailsText,
   ]);
   const isFormValid = Object.keys(validationErrors).length === 0;
@@ -363,6 +370,12 @@ export function useSalesPage() {
   const handleProductChange = (productId: string) => {
     setSelectedProductId(productId);
     setTouched((t) => ({ ...t, productId: true }));
+    if (productId === MEAL_PRODUCT_ID) {
+      setSaleUnit('');
+      setProductDetailsText('');
+      setNewSale((prev) => ({ ...prev, amount: 0 }));
+      return;
+    }
     const item = inventory.find((i) => i.id === productId);
     const nextUnit: 'Carton' | 'Kg' | '' = item?.unitOfMeasure === 'Cartons' ? 'Carton' : '';
     setSaleUnit(nextUnit);
@@ -432,9 +445,11 @@ export function useSalesPage() {
     const touchFields: Record<string, boolean> = {
       customerId: true,
       dueDate: true,
-      ...(isHistoricalSale
-        ? { productDetails: true, amount: true }
-        : { productId: true, quantity: true, saleUnit: true }),
+      ...(isMealSale
+        ? { productId: true, productDetails: true, quantity: true, amount: true }
+        : isHistoricalSale
+          ? { productDetails: true, amount: true }
+          : { productId: true, quantity: true, saleUnit: true }),
     };
     setTouched(touchFields);
     if (!isFormValid) {
@@ -443,7 +458,7 @@ export function useSalesPage() {
     }
 
     const inventoryItem = inventory.find((i) => i.id === selectedProductId);
-    if (!isHistoricalSale) {
+    if (!isHistoricalSale && !isMealSale) {
       const needed = stockQtyForSale(inventoryItem, quantity, saleUnit);
       if (!inventoryItem || needed > inventoryItem.currentStock) {
         toast.error(`Insufficient stock in ${selectedHub}.`);
@@ -463,8 +478,16 @@ export function useSalesPage() {
       return;
     }
 
-    const saleItemPayload =
-      selectedProductId && quantity > 0
+    const saleItemPayload = isMealSale
+      ? {
+          item: {
+            product_name: productDetailsText.trim(),
+            quantity: quantity > 0 ? quantity : 1,
+            unit: 'Food plate',
+            category: 'Kitchen',
+          },
+        }
+      : selectedProductId && quantity > 0
         ? {
             item: {
               product_id: selectedProductId,
@@ -825,6 +848,7 @@ export function useSalesPage() {
     productDetailsText,
     setProductDetailsText,
     isHistoricalSale,
+    isMealSale,
     isFormValid,
     customerCreditWarning,
     selectedFormCustomer,

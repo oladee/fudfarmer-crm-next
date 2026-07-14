@@ -10,6 +10,7 @@ import {
   useInventory, useCreateProduct, useUpdateProduct, useStockLogs,
   useRecordStockMove, useTransferStock, useBatchStockUpdate, useHubs,
   useDownloadInventoryImportTemplate, useValidateInventoryImport, useImportInventory,
+  useInventorySalesMetrics,
 } from '@/hooks/use-queries';
 import { InventoryItem, StockLog, StockMovementType } from '@/types';
 import type { InventoryImportPreviewRow } from '@/types/api';
@@ -21,8 +22,11 @@ import {
   Tag, AlertCircle, RefreshCw, Upload, ListChecks, MapPin, BarChart4,
   ArrowUpRight, ArrowDownRight, X, Activity, Calendar, TrendingUp, TrendingDown,
   Edit3, Clock, ArrowRightLeft, Thermometer, Filter, ChevronDown, Download,
-  Warehouse, ShieldAlert, Percent, Eye, Boxes,
+  Warehouse, ShieldAlert, Percent, Eye, Boxes, UtensilsCrossed,
 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts';
 
 type ProductCategory = InventoryItem['category'];
 const ALL_UOMS: InventoryItem['unitOfMeasure'][] = ['Cartons', 'Units', 'Kg', 'Liters'];
@@ -165,6 +169,18 @@ export default function InventoryPage() {
   const importInventory = useImportInventory();
   const { data: items = [] } = useInventory({ hub_id: hubScope.hubIdForApi });
   const { data: logs = [] } = useStockLogs({ hub_id: hubScope.hubIdForApi });
+  const { data: salesMetrics } = useInventorySalesMetrics({ hub_id: hubScope.hubIdForApi });
+  const volumeChartData = useMemo(
+    () => [
+      { unit: 'Kg', quantity: salesMetrics?.volumeByUnit.Kg ?? 0 },
+      { unit: 'Litres', quantity: salesMetrics?.volumeByUnit.Litres ?? 0 },
+      { unit: 'Units', quantity: salesMetrics?.volumeByUnit.Units ?? 0 },
+    ],
+    [salesMetrics],
+  );
+  const mealsServed = salesMetrics?.mealsServed ?? 0;
+  const topSellers = salesMetrics?.topSellers ?? [];
+  const mostVolatile = salesMetrics?.mostVolatile ?? [];
   const createProduct = useCreateProduct();
   const updateProduct = useUpdateProduct();
   const recordStockMove = useRecordStockMove();
@@ -759,7 +775,7 @@ export default function InventoryPage() {
       )}
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
         {[
           { label: 'Inventory Value (Cost)', value: `\u20A6${inventoryValue.toLocaleString()}`, icon: <BarChart4 size={14} />, color: 'text-primary', sub: null as string | null },
           { label: 'Total Active SKUs', value: filteredItems.length, icon: <Package size={14} />, color: 'text-blue-600', sub: null },
@@ -770,6 +786,7 @@ export default function InventoryPage() {
             color: 'text-indigo-600',
             sub: unitsByUom.length > 0 ? unitsByUom.slice(0, 3).map(([uom, qty]) => `${qty.toLocaleString()} ${uom}`).join(' · ') : null,
           },
+          { label: 'Meals Served', value: mealsServed.toLocaleString(), icon: <UtensilsCrossed size={14} />, color: 'text-pink-600', sub: 'Kitchen · Food plate' },
           { label: 'Low Stock Alerts', value: lowStockItems.length, icon: <AlertTriangle size={14} />, color: lowStockItems.length > 0 ? 'text-red-600' : 'text-muted-foreground', sub: null },
           { label: 'Expiring Soon', value: expiringSoonCount, icon: <Thermometer size={14} />, color: expiringSoonCount > 0 ? 'text-orange-600' : 'text-muted-foreground', sub: null },
           ...(isAdmin ? [{ label: 'Retail Value', value: `\u20A6${retailValue.toLocaleString()}`, icon: <span className="text-sm font-bold">₦</span>, color: 'text-green-600', sub: null }] : []),
@@ -780,6 +797,72 @@ export default function InventoryPage() {
             {kpi.sub && <p className="text-[10px] text-muted-foreground mt-1 truncate" title={kpi.sub}>{kpi.sub}</p>}
           </div>
         ))}
+      </div>
+
+      {/* Sales volume + rankings */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="rounded-xl border bg-card p-4 shadow-sm lg:col-span-1">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+            <BarChart4 size={14} className="text-primary" /> Volume Sold by Unit
+          </h3>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={volumeChartData}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="unit" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(value: number) => value.toLocaleString()} />
+                <Bar dataKey="quantity" radius={[4, 4, 0, 0]}>
+                  {volumeChartData.map((_, idx) => (
+                    <Cell key={idx} fill={['#0891b2', '#16a34a', '#7c3aed'][idx % 3]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+            <TrendingUp size={14} className="text-emerald-600" /> Top 3 Best Sellers
+          </h3>
+          {topSellers.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No sales volume yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {topSellers.map((s, i) => (
+                <li key={s.productName} className="flex items-start justify-between gap-2 text-sm border-b border-border/60 pb-2 last:border-0">
+                  <div>
+                    <p className="font-medium">{i + 1}. {s.productName}</p>
+                    <p className="text-[11px] text-muted-foreground">{s.quantity.toLocaleString()} sold</p>
+                  </div>
+                  <p className="text-xs font-semibold text-emerald-700 whitespace-nowrap">₦{Math.round(s.revenue).toLocaleString()}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+            <Activity size={14} className="text-orange-600" /> Top 3 Most Volatile
+          </h3>
+          {mostVolatile.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Need 2+ price history points per product.</p>
+          ) : (
+            <ul className="space-y-2">
+              {mostVolatile.map((v, i) => (
+                <li key={v.productName} className="flex items-start justify-between gap-2 text-sm border-b border-border/60 pb-2 last:border-0">
+                  <div>
+                    <p className="font-medium">{i + 1}. {v.productName}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Last change {v.lastChangeDate ? new Date(v.lastChangeDate).toLocaleDateString() : '—'}
+                    </p>
+                  </div>
+                  <p className="text-xs font-semibold text-orange-700 whitespace-nowrap">{v.volatilityPct.toFixed(1)}%</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       {/* ══════════════════ PRODUCTS VIEW ══════════════════ */}

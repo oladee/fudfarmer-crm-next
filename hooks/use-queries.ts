@@ -28,6 +28,7 @@ import {
   ApiSegment,
   ApiDashboardMetricsRaw,
   DashboardMetricsData,
+  InventorySalesMetrics,
   DashboardPeriod,
   DashboardSalesSummary,
   DashboardCategoryRevenue,
@@ -220,14 +221,47 @@ function parseAuditListResponse(
   return EMPTY_AUDIT_LIST;
 }
 
+const EMPTY_CUSTOMER_SUMMARY: CustomerListSummary = {
+  total: 0,
+  b2b: 0,
+  b2c: 0,
+  repeat: 0,
+  totalRevenue: 0,
+  avgValue: 0,
+  ytdCustomers: 0,
+  newThisMonth: 0,
+  newLastMonth: 0,
+  newCustomersMomPct: 0,
+  retentionRate: 0,
+};
+
 const EMPTY_CUSTOMER_LIST: CustomerListResult = {
   items: [],
   meta: { page: 1, limit: CUSTOMERS_PAGE_SIZE, total: 0, totalPages: 1 },
-  summary: { total: 0, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 },
+  summary: { ...EMPTY_CUSTOMER_SUMMARY },
 };
 
 function defaultCustomerListSummary(total: number): CustomerListSummary {
-  return { total, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 };
+  return { ...EMPTY_CUSTOMER_SUMMARY, total };
+}
+
+function normalizeCustomerListSummary(
+  summary?: Partial<ApiCustomerListSummary> | null,
+  fallbackTotal = 0,
+): CustomerListSummary {
+  return {
+    total: summary?.total ?? fallbackTotal,
+    b2b: summary?.b2b ?? 0,
+    b2c: summary?.b2c ?? 0,
+    repeat: summary?.repeat ?? 0,
+    totalRevenue: summary?.totalRevenue ?? 0,
+    avgValue: summary?.avgValue ?? 0,
+    ytdCustomers: summary?.ytdCustomers ?? 0,
+    newThisMonth: summary?.newThisMonth ?? 0,
+    newLastMonth: summary?.newLastMonth ?? 0,
+    newCustomersMomPct: summary?.newCustomersMomPct ?? 0,
+    retentionRate: summary?.retentionRate ?? 0,
+  };
 }
 
 function isPaginatedCustomerList(value: unknown): value is ApiCustomerListResponse {
@@ -268,7 +302,7 @@ function parseCustomerListResponse(raw: unknown): {
     return {
       data: list.data ?? [],
       meta,
-      summary: list.summary ?? defaultCustomerListSummary(meta.total),
+      summary: normalizeCustomerListSummary(list.summary, meta.total),
     };
   }
 
@@ -854,6 +888,7 @@ export function useCreateSale() {
       qc.invalidateQueries({ queryKey: ['sales-summary'] });
       qc.invalidateQueries({ queryKey: ['customers'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['inventory-sales-metrics'] });
       qc.invalidateQueries({ queryKey: ['stockLogs'] });
       invalidateCredits(qc);
       qc.invalidateQueries({ queryKey: ['dashboardMetrics'] });
@@ -872,6 +907,7 @@ export function useUpdateSale() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales'] });
       qc.invalidateQueries({ queryKey: ['sales-summary'] });
+      qc.invalidateQueries({ queryKey: ['inventory-sales-metrics'] });
     },
   });
 }
@@ -916,6 +952,7 @@ export function useVoidSale() {
       qc.invalidateQueries({ queryKey: ['sales-summary'] });
       qc.invalidateQueries({ queryKey: ['customers'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['inventory-sales-metrics'] });
       qc.invalidateQueries({ queryKey: ['stockLogs'] });
       invalidateCredits(qc);
     },
@@ -927,6 +964,7 @@ function invalidateSalesImportQueries(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['sales-summary'] });
   qc.invalidateQueries({ queryKey: ['customers'] });
   qc.invalidateQueries({ queryKey: ['inventory'] });
+  qc.invalidateQueries({ queryKey: ['inventory-sales-metrics'] });
   qc.invalidateQueries({ queryKey: ['stockLogs'] });
   invalidateCredits(qc);
   qc.invalidateQueries({ queryKey: ['dashboardMetrics'] });
@@ -1093,6 +1131,33 @@ export function useInventory(filters?: { hub_id?: string; category?: string; low
       };
       const res = await axiosGet(`inventory${buildQuery(params)}`, true) as ApiListResponse<ApiProduct[]>;
       return (res.data ?? []).map((p) => mapInventoryItem(p, hubMap));
+    },
+  });
+}
+
+export function useInventorySalesMetrics(filters?: { hub_id?: string }) {
+  return useQuery({
+    queryKey: ['inventory-sales-metrics', filters],
+    queryFn: async (): Promise<InventorySalesMetrics> => {
+      if (!HAS_API) {
+        return {
+          volumeByUnit: { Kg: 0, Litres: 0, Units: 0 },
+          topSellers: [],
+          mostVolatile: [],
+          mealsServed: 0,
+        };
+      }
+      const params: Record<string, string | undefined> = { hub_id: filters?.hub_id };
+      const res = await axiosGet(
+        `inventory/sales-metrics${buildQuery(params)}`,
+        true,
+      ) as ApiListResponse<InventorySalesMetrics>;
+      return res.data ?? {
+        volumeByUnit: { Kg: 0, Litres: 0, Units: 0 },
+        topSellers: [],
+        mostVolatile: [],
+        mealsServed: 0,
+      };
     },
   });
 }

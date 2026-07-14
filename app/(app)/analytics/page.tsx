@@ -130,12 +130,46 @@ function SalesAnalysis({ data }: { data: AnalyticsOverviewData['sales'] }) {
 
   return (
     <div className="space-y-5">
+      {growth && (
+        <div className="rounded-xl border bg-gradient-to-br from-cyan-50 to-card p-5 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-1">
+              Revenue Growth Rate (MoM %)
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Month-over-month revenue change vs {growth.prevMonth}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className={`inline-flex items-center gap-1 text-3xl font-black ${
+                growth.revGrowth > 0
+                  ? 'text-emerald-600'
+                  : growth.revGrowth < 0
+                    ? 'text-red-600'
+                    : 'text-muted-foreground'
+              }`}
+            >
+              {growth.revGrowth > 0 ? (
+                <ArrowUpRight size={28} />
+              ) : growth.revGrowth < 0 ? (
+                <ArrowDownRight size={28} />
+              ) : (
+                <Minus size={28} />
+              )}
+              {growth.revGrowth > 0 ? '+' : ''}
+              {growth.revGrowth}%
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Growth KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         {growth && (
           <>
             <div className="rounded-xl border bg-card p-4 shadow-sm">
-              <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Revenue Growth</p>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase mb-1">Revenue Growth Rate MoM</p>
               <div className="flex items-end gap-2">
                 <GrowthBadge value={growth.revGrowth} />
                 <span className="text-[10px] text-muted-foreground">vs {growth.prevMonth}</span>

@@ -62,6 +62,7 @@ export interface AddSaleModalProps {
   savingSale?: boolean;
   isFormValid: boolean;
   isHistoricalSale: boolean;
+  isMealSale?: boolean;
   productDetailsText: string;
   setProductDetailsText: (value: string) => void;
   canCreateSale: boolean;
@@ -107,6 +108,7 @@ export function AddSaleModal({
   savingSale = false,
   isFormValid,
   isHistoricalSale,
+  isMealSale = false,
   productDetailsText,
   setProductDetailsText,
   canCreateSale,
@@ -205,22 +207,62 @@ export function AddSaleModal({
             </div>
           )}
 
-          {isHistoricalSale && (
+          {isHistoricalSale && !isMealSale && (
             <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
               Historical sale — stock will not be deducted. Enter amount and product description if not using catalog.
+            </div>
+          )}
+          {isMealSale && (
+            <div className="rounded-md border border-pink-200 bg-pink-50 p-3 text-sm text-pink-900">
+              Meal sale — category Kitchen, unit Food plate. No stock deduction.
             </div>
           )}
 
           {/* Product */}
           <div className="space-y-2">
             <label htmlFor="sale-product" className={LABEL_CLS}>
-              Product{isHistoricalSale ? '' : ' *'}
+              Product{isHistoricalSale || isMealSale ? '' : ' *'}
             </label>
             <select id="sale-product" value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={`${INPUT_CLS} ${touched.productId && validationErrors.productId ? 'border-red-500' : ''}`}>
-              <option value="">-- Select Product --</option>{availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name} (Stock: {i.currentStock} {i.unitOfMeasure})</option>)}
+              <option value="">-- Select Product --</option>
+              <option value="__meal__">Record a meal…</option>
+              {availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name} (Stock: {i.currentStock} {i.unitOfMeasure})</option>)}
             </select>
             {touched.productId && validationErrors.productId && <p className="text-xs text-red-500">{validationErrors.productId}</p>}
-            {isHistoricalSale && !selectedProductId && (
+            {isMealSale && (
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <div className="space-y-1">
+                  <label htmlFor="sale-meal-name" className="text-xs font-medium text-muted-foreground">
+                    Meal name *
+                  </label>
+                  <input
+                    id="sale-meal-name"
+                    type="text"
+                    value={productDetailsText}
+                    onChange={(e) => {
+                      setProductDetailsText(e.target.value);
+                      setTouched((t) => ({ ...t, productDetails: true }));
+                    }}
+                    placeholder="e.g. Jollof rice plate"
+                    className={`${INPUT_CLS} ${touched.productDetails && validationErrors.productDetails ? 'border-red-500' : ''}`}
+                  />
+                  {touched.productDetails && validationErrors.productDetails && (
+                    <p className="text-xs text-red-500">{validationErrors.productDetails}</p>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-muted-foreground">Category</p>
+                    <p className="text-sm font-medium">Kitchen</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase text-muted-foreground">Unit</p>
+                    <p className="text-sm font-medium">Food plate</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {isHistoricalSale && !isMealSale && !selectedProductId && (
               <div className="space-y-1">
                 <label htmlFor="sale-product-details" className="text-xs font-medium text-muted-foreground">
                   Product description
@@ -238,7 +280,7 @@ export function AddSaleModal({
                 )}
               </div>
             )}
-            {selectedInventoryItem && (
+            {selectedInventoryItem && !isMealSale && (
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span className={`font-medium ${selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel ? 'text-red-600' : 'text-green-600'}`}>
                   {selectedInventoryItem.currentStock} {selectedInventoryItem.unitOfMeasure} in stock
@@ -255,8 +297,8 @@ export function AddSaleModal({
           </div>
 
           {/* Quantity, sale unit & Amount */}
-          <div className={`grid grid-cols-1 ${isCartonProduct ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
-            {isCartonProduct && (
+          <div className={`grid grid-cols-1 ${isCartonProduct && !isMealSale ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
+            {isCartonProduct && !isMealSale && (
               <div className="space-y-2">
                 <label htmlFor="sale-unit" className={LABEL_CLS}>Unit *</label>
                 <select
@@ -276,7 +318,7 @@ export function AddSaleModal({
             )}
             <div className="space-y-2">
               <label htmlFor="sale-quantity" className={LABEL_CLS}>
-                Quantity{saleUnit ? ` (${saleUnit})` : ''}
+                Quantity{isMealSale ? ' (Food plate)' : saleUnit ? ` (${saleUnit})` : ''}
               </label>
               <input
                 id="sale-quantity"
@@ -288,20 +330,20 @@ export function AddSaleModal({
                 className={`${INPUT_CLS} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`}
               />
               {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
-              {isCartonProduct && saleUnit === 'Kg' && selectedInventoryItem?.cartonWeight ? (
+              {isCartonProduct && !isMealSale && saleUnit === 'Kg' && selectedInventoryItem?.cartonWeight ? (
                 <p className="text-xs text-muted-foreground">
                   Deducts {(quantity / selectedInventoryItem.cartonWeight).toFixed(4)} cartons from stock
                 </p>
               ) : null}
             </div>
             <div className="space-y-2">
-              <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA}){isHistoricalSale ? ' *' : ''}</label>
+              <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA}){isHistoricalSale || isMealSale ? ' *' : ''}</label>
               <input id="sale-amount" type="number" step="0.01" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: Number(e.target.value) || 0 })} className={`${INPUT_CLS} ${touched.amount && validationErrors.amount ? 'border-red-500' : ''}`} />
               {touched.amount && validationErrors.amount && <p className="text-xs text-red-500">{validationErrors.amount}</p>}
             </div>
           </div>
           {/* Live price breakdown */}
-          {selectedInventoryItem && quantity > 0 && (
+          {selectedInventoryItem && !isMealSale && quantity > 0 && (
             <div className="text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2 flex items-center gap-3 flex-wrap">
               {(() => {
                 const unitPrice =

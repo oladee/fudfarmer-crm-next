@@ -123,7 +123,19 @@ export default function CustomersPage() {
   const customers = customerList?.items ?? [];
   const tableLoading = customersLoading || customersFetching;
   const customerMeta = customerList?.meta ?? { page: 1, limit: CUSTOMERS_PAGE_SIZE, total: 0, totalPages: 1 };
-  const kpis = customerList?.summary ?? { total: 0, b2b: 0, b2c: 0, repeat: 0, totalRevenue: 0, avgValue: 0 };
+  const kpis = customerList?.summary ?? {
+    total: 0,
+    b2b: 0,
+    b2c: 0,
+    repeat: 0,
+    totalRevenue: 0,
+    avgValue: 0,
+    ytdCustomers: 0,
+    newThisMonth: 0,
+    newLastMonth: 0,
+    newCustomersMomPct: 0,
+    retentionRate: 0,
+  };
   const { data: agents = [] } = useAgents(undefined, { enabled: showAddModal });
   const detailDataEnabled = !!selectedCustomer;
   const { data: salesList } = useSales(undefined, { enabled: detailDataEnabled });
@@ -489,10 +501,25 @@ export default function CustomersPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3">
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><Users size={14} className="text-muted-foreground" /><span className="text-[10px] font-bold uppercase text-muted-foreground">Total</span></div>
           <MetricValue value={kpis.total} />
+        </div>
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1"><Calendar size={14} className="text-sky-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">YTD Customers</span></div>
+          <MetricValue value={kpis.ytdCustomers} />
+        </div>
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1"><Plus size={14} className="text-teal-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">New This Month</span></div>
+          <MetricValue value={kpis.newThisMonth} />
+          <p className={`mt-1 text-[10px] font-semibold ${kpis.newCustomersMomPct > 0 ? 'text-emerald-600' : kpis.newCustomersMomPct < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+            {kpis.newCustomersMomPct > 0 ? '+' : ''}{kpis.newCustomersMomPct.toFixed(1)}% MoM
+          </p>
+        </div>
+        <div className="rounded-xl border bg-card p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-1"><Heart size={14} className="text-rose-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">Retention</span></div>
+          <MetricValue value={`${kpis.retentionRate.toFixed(1)}%`} />
         </div>
         <div className="rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-1"><Building2 size={14} className="text-blue-600" /><span className="text-[10px] font-bold uppercase text-muted-foreground">B2B</span></div>

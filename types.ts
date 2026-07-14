@@ -285,6 +285,11 @@ export interface CustomerListSummary {
   repeat: number;
   totalRevenue: number;
   avgValue: number;
+  ytdCustomers: number;
+  newThisMonth: number;
+  newLastMonth: number;
+  newCustomersMomPct: number;
+  retentionRate: number;
 }
 
 export interface CustomerListResult {

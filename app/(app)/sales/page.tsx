@@ -93,7 +93,7 @@ export default function SalesPage() {
     showAddModal, setShowAddModal, newSale, setNewSale, selectedHub, setSelectedHub,
     selectedProductId, setSelectedProductId, quantity, saleUnit, paymentMode, setPaymentMode,
     paymentType, setPaymentType, amountPaid, setAmountPaid, dueDate, setDueDate,
-    touched, setTouched, validationErrors, isFormValid, isHistoricalSale,
+    touched, setTouched, validationErrors, isFormValid, isHistoricalSale, isMealSale,
     productDetailsText, setProductDetailsText, customerCreditWarning,
     selectedFormCustomer, availableInventory, selectedInventoryItem, isCartonProduct,
     handleProductChange, handleQuantityChange, handleSaleUnitChange, handleSaveSale,
@@ -400,6 +400,7 @@ export default function SalesPage() {
         savingSale={savingSale}
         isFormValid={isFormValid}
         isHistoricalSale={isHistoricalSale}
+        isMealSale={isMealSale}
         productDetailsText={productDetailsText}
         setProductDetailsText={setProductDetailsText}
         canCreateSale={can('sales.create')}

@@ -150,6 +150,11 @@ export interface ApiCustomerListSummary {
   repeat: number;
   totalRevenue: number;
   avgValue: number;
+  ytdCustomers?: number;
+  newThisMonth?: number;
+  newLastMonth?: number;
+  newCustomersMomPct?: number;
+  retentionRate?: number;
 }
 
 export interface ApiCustomerListResponse {
@@ -671,6 +676,19 @@ export interface CustomerImportPreviewRow {
 export interface CustomerImportValidateResponse {
   rows: CustomerImportPreviewRow[];
   summary: { total: number; valid: number; invalid: number; warnings: number; skipped?: number };
+}
+
+export interface InventorySalesMetrics {
+  volumeByUnit: { Kg: number; Litres: number; Units: number };
+  topSellers: { productName: string; quantity: number; revenue: number }[];
+  mostVolatile: {
+    productName: string;
+    volatilityPct: number;
+    lastChangeDate: string | null;
+    minPrice: number;
+    maxPrice: number;
+  }[];
+  mealsServed: number;
 }
 
 export interface CustomerImportResult {
