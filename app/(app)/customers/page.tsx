@@ -6,6 +6,7 @@ import {
   useCustomers, useCreateCustomer, useUpdateCustomer, useAgents,
   useCustomerCredits, useSales, useFeedback, useEnquiries, useCompensations, useHubs,
   useDownloadCustomerImportTemplate, useValidateCustomerImport, useImportCustomers, useSegments,
+  useCreateSegment,
 } from '@/hooks/use-queries';
 import {
   Customer, CustomerType, PREDEFINED_SEGMENTS,
@@ -101,6 +102,7 @@ export default function CustomersPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
   const { data: segments = [] } = useSegments();
+  const createSegment = useCreateSegment();
   const segmentId = filterSegment === 'All'
     ? undefined
     : segments.find((s) => s.name === filterSegment)?.id;
@@ -182,36 +184,51 @@ export default function CustomersPage() {
     failed: number;
     rows: CustomerImportSummaryRow[];
   } | null>(null);
-  const [customSegments, setCustomSegments] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    const stored = localStorage.getItem('fudfarmer_custom_segments');
-    return stored ? JSON.parse(stored) : [];
-  });
 
   const allSegments = useMemo(() => {
-    const merged = [...PREDEFINED_SEGMENTS, ...customSegments];
-    return Array.from(new Set(merged));
-  }, [customSegments]);
+    const fromApi = segments.map((s) => s.name);
+    const merged = [...PREDEFINED_SEGMENTS, ...fromApi];
+    return Array.from(new Set(merged)).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' }),
+    );
+  }, [segments]);
 
-  const addCustomSegment = (name: string, target: 'add' | 'edit') => {
+  const resolveSegmentIds = async (names: string[]): Promise<string[]> => {
+    const catalog = [...segments];
+    const ids: string[] = [];
+    for (const name of names) {
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+      let found = catalog.find((s) => s.name.toLowerCase() === trimmed.toLowerCase());
+      if (!found) {
+        found = await createSegment.mutateAsync({ name: trimmed });
+        catalog.push(found);
+      }
+      ids.push(found.id);
+    }
+    return ids;
+  };
+
+  const addCustomSegment = async (name: string, target: 'add' | 'edit') => {
     const trimmed = name.trim();
     if (!trimmed) return;
     if (allSegments.some((s) => s.toLowerCase() === trimmed.toLowerCase())) {
       toast.error(`Segment "${trimmed}" already exists.`);
       return;
     }
-    const updated = [...customSegments, trimmed];
-    setCustomSegments(updated);
-    localStorage.setItem('fudfarmer_custom_segments', JSON.stringify(updated));
-    // Auto-select the new segment
-    if (target === 'add') {
-      setNewCustomer((prev) => ({ ...prev, segments: [...(prev.segments || []), trimmed] }));
-      setNewSegmentInput('');
-    } else {
-      setEditForm((prev) => ({ ...prev, segments: [...(prev.segments || []), trimmed] }));
-      setEditSegmentInput('');
+    try {
+      await createSegment.mutateAsync({ name: trimmed });
+      if (target === 'add') {
+        setNewCustomer((prev) => ({ ...prev, segments: [...(prev.segments || []), trimmed] }));
+        setNewSegmentInput('');
+      } else {
+        setEditForm((prev) => ({ ...prev, segments: [...(prev.segments || []), trimmed] }));
+        setEditSegmentInput('');
+      }
+      toast.success(`Segment "${trimmed}" created.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create segment.');
     }
-    toast.success(`Segment "${trimmed}" created.`);
   };
 
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
@@ -264,7 +281,7 @@ export default function CustomersPage() {
   // kpis comes from customerList.summary above
 
   // --- Add Customer ---
-  const handleSaveCustomer = () => {
+  const handleSaveCustomer = async () => {
     if (!newCustomer.name || !newCustomer.email) { toast.error('Please enter Name and Email.'); return; }
     if (isB2bCustomerType(newCustomer.type) && !newCustomer.companyName?.trim()) {
       toast.error('Company name is required for B2B customers.');
@@ -275,22 +292,28 @@ export default function CustomersPage() {
       if (dup) { toast.error(`A customer with email "${newCustomer.email}" already exists.`); return; }
     }
     const hub = activeHubs.find((h) => h.name === (newCustomer.location || activeHubs[0]?.name));
-    createCustomer.mutate({
-      customer_name: newCustomer.name!,
-      customer_email: newCustomer.email!,
-      customer_phone: customerPhoneForApi(newCustomer.phone),
-      customer_type: newCustomer.type as CustomerType,
-      customer_location: hub?.id || activeHubs[0]?.id || '',
-      company_name: newCustomer.companyName,
-      assigned_agent: newCustomer.addedByAgentId,
-    }, {
-      onSuccess: () => {
-        setShowAddModal(false);
-        setNewCustomer({ name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C, location: hubScope.hubName || hubScope.defaultHubName || activeHubs[0]?.name || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0 });
-        toast.success('Customer added.');
-      },
-      onError: (err) => toast.error(err.message),
-    });
+    try {
+      const segmentIds = await resolveSegmentIds(newCustomer.segments || []);
+      createCustomer.mutate({
+        customer_name: newCustomer.name!,
+        customer_email: newCustomer.email!,
+        customer_phone: customerPhoneForApi(newCustomer.phone),
+        customer_type: newCustomer.type as CustomerType,
+        customer_location: hub?.id || activeHubs[0]?.id || '',
+        company_name: newCustomer.companyName,
+        assigned_agent: newCustomer.addedByAgentId,
+        segments: segmentIds,
+      }, {
+        onSuccess: () => {
+          setShowAddModal(false);
+          setNewCustomer({ name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C, location: hubScope.hubName || hubScope.defaultHubName || activeHubs[0]?.name || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0 });
+          toast.success('Customer added.');
+        },
+        onError: (err) => toast.error(err.message),
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to resolve segments.');
+    }
   };
 
   const toggleSegment = (segment: string) => {
@@ -305,29 +328,35 @@ export default function CustomersPage() {
     setIsEditing(true);
   };
 
-  const handleUpdateCustomer = () => {
+  const handleUpdateCustomer = async () => {
     if (!editForm.name || !editForm.email || !selectedCustomer) { toast.error('Name and Email are required.'); return; }
     if (isB2bCustomerType(editForm.type) && !editForm.companyName?.trim()) {
       toast.error('Company name is required for B2B customers.');
       return;
     }
     const hub = activeHubs.find((h) => h.name === editForm.location);
-    updateCustomer.mutate({
-      id: selectedCustomer.id,
-      customer_name: editForm.name,
-      customer_email: editForm.email,
-      customer_phone: customerPhoneForApi(editForm.phone),
-      customer_type: editForm.type,
-      customer_location: hub?.id,
-      company_name: editForm.companyName,
-    }, {
-      onSuccess: (updated) => {
-        setSelectedCustomer(updated);
-        setIsEditing(false);
-        toast.success('Customer updated.');
-      },
-      onError: (err) => toast.error(err.message),
-    });
+    try {
+      const segmentIds = await resolveSegmentIds(editForm.segments || []);
+      updateCustomer.mutate({
+        id: selectedCustomer.id,
+        customer_name: editForm.name,
+        customer_email: editForm.email,
+        customer_phone: customerPhoneForApi(editForm.phone),
+        customer_type: editForm.type,
+        customer_location: hub?.id,
+        company_name: editForm.companyName,
+        segments: segmentIds,
+      }, {
+        onSuccess: (updated) => {
+          setSelectedCustomer(updated);
+          setIsEditing(false);
+          toast.success('Customer updated.');
+        },
+        onError: (err) => toast.error(err.message),
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to resolve segments.');
+    }
   };
 
   const toggleEditSegment = (segment: string) => {

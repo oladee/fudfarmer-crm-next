@@ -773,7 +773,10 @@ export function useSegments() {
 export function useCreateSegment() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dto: { name: string }) => axiosPost('customers/segments', dto, true),
+    mutationFn: async (dto: { name: string }) => {
+      const raw = await axiosPost('customers/segments', dto, true);
+      return mapSegment(unwrapApiEntity<ApiSegment>(raw));
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['segments'] }),
   });
 }
