@@ -406,7 +406,11 @@ export default function CustomersPage() {
     return Object.entries(byMonth)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, amount]) => ({
-        month: new Date(month + '-01').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+        month: new Date(`${month}-01T00:00:00.000Z`).toLocaleDateString('en-US', {
+          month: 'short',
+          year: 'numeric',
+          timeZone: 'UTC',
+        }),
         amount,
       }));
   }, [customerSales]);

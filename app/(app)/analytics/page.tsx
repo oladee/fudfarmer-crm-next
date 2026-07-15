@@ -37,8 +37,15 @@ const CAT_COLORS = PRODUCT_CATEGORY_COLORS;
 type AnalyticsTab = 'sales' | 'products' | 'customers' | 'credit';
 
 function getMonthLabel(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  const s = String(dateStr ?? '').trim();
+  const d = /^\d{4}-\d{2}/.test(s)
+    ? new Date(`${s.slice(0, 7)}-01T00:00:00.000Z`)
+    : new Date(s);
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 }
 
 export default function AnalyticsPage() {
