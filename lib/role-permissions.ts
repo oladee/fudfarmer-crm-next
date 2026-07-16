@@ -17,6 +17,8 @@ export const BACKEND_MODULE_SUBMODULES: Record<string, string[]> = {
     'edit_product_detail',
     'adjust_stock',
     'transfer_btw_hubs',
+    'request_inventory',
+    'fulfill_inventory_requests',
     'import_csv',
     'export_csv',
   ],

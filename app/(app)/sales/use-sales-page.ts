@@ -283,10 +283,6 @@ export function useSalesPage() {
           errors.saleUnit = 'Set carton weight on this product before recording a sale.';
         }
       }
-      const needed = stockQtyForSale(selectedInventoryItem, quantity, saleUnit);
-      if (selectedInventoryItem && needed > selectedInventoryItem.currentStock) {
-        errors.quantity = `Exceeds stock (${selectedInventoryItem.currentStock} ${selectedInventoryItem.unitOfMeasure}).`;
-      }
     } else {
       if (!selectedProductId && !productDetailsText.trim()) {
         errors.productDetails = 'Enter a product description or select a catalog product.';
@@ -458,12 +454,9 @@ export function useSalesPage() {
     }
 
     const inventoryItem = inventory.find((i) => i.id === selectedProductId);
-    if (!isHistoricalSale && !isMealSale) {
-      const needed = stockQtyForSale(inventoryItem, quantity, saleUnit);
-      if (!inventoryItem || needed > inventoryItem.currentStock) {
-        toast.error(`Insufficient stock in ${selectedHub}.`);
-        return;
-      }
+    if (!isHistoricalSale && !isMealSale && !inventoryItem && selectedProductId) {
+      toast.error('Product not found.');
+      return;
     }
 
     const amount = Number(newSale.amount);

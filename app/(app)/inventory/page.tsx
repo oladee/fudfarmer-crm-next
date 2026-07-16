@@ -17,6 +17,7 @@ import { InventoryItem, StockLog, StockMovementType } from '@/types';
 import type { InventoryImportPreviewRow } from '@/types/api';
 import { PRODUCT_CATEGORIES } from '@/lib/product-categories';
 import { InventoryImportModal } from './inventory-import-modal';
+import { InventoryRequestsPanel } from './inventory-requests-panel';
 import { toast } from 'sonner';
 import {
   Plus, Box, Search, History, Package, AlertTriangle, Truck, Layers,
@@ -195,7 +196,7 @@ export default function InventoryPage() {
   const activeHubs = hubs.filter(h => h.isActive);
 
   // View state
-  const [activeView, setActiveView] = useState<'Products' | 'Ledger'>('Products');
+  const [activeView, setActiveView] = useState<'Products' | 'Ledger' | 'Requests'>('Products');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
   const [filterCategory, setFilterCategory] = useState<ProductCategory | 'All'>('All');
@@ -672,7 +673,21 @@ export default function InventoryPage() {
           <p className="text-muted-foreground text-sm">FIFO-tracked stock management across hubs with batch &amp; expiry control.</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {can('inventory.create') && (
+          <div className="inline-flex rounded-lg border bg-muted/30 p-1">
+            {(['Products', 'Ledger', 'Requests'] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => setActiveView(view)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  activeView === view ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {view}
+              </button>
+            ))}
+          </div>
+          {can('inventory.create') && activeView === 'Products' && (
             <button
               onClick={() => setShowAddProductModal(true)}
               className="inline-flex items-center rounded-md text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-10 px-4 py-2"
@@ -698,6 +713,15 @@ export default function InventoryPage() {
                     {activeView === 'Products' ? <History size={14} className="text-muted-foreground" /> : <Layers size={14} className="text-muted-foreground" />}
                     {activeView === 'Products' ? 'View Ledger' : 'Back to SKUs'}
                   </button>
+                  {(can('inventory.request') || can('inventory.fulfill_requests')) && (
+                    <button
+                      onClick={() => { setActiveView('Requests'); setShowActionDropdown(false); }}
+                      className="flex items-center gap-3 w-full px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
+                    >
+                      <Truck size={14} className="text-muted-foreground" />
+                      Inventory Requests
+                    </button>
+                  )}
                   {can('inventory.adjust_stock') && (
                     <button
                       onClick={() => { setIsSelectionMode(!isSelectionMode); setShowActionDropdown(false); }}
@@ -873,8 +897,10 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* ══════════════════ PRODUCTS VIEW ══════════════════ */}
-      {activeView === 'Products' ? (
+      {/* ════════════════════════ REQUESTS VIEW ════════════════════════ */}
+      {activeView === 'Requests' ? (
+        <InventoryRequestsPanel />
+      ) : activeView === 'Products' ? (
         <div className="space-y-5">
           {/* Search & actions bar */}
           <div className="flex flex-col sm:flex-row gap-3 items-center bg-card p-4 rounded-lg border shadow-sm">

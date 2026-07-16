@@ -120,6 +120,8 @@ export function mapHub(h: ApiHub): Hub {
     typeof h.hub_manager === 'object' && h.hub_manager
       ? h.hub_manager
       : null;
+  const parentHub =
+    typeof h.parent_hub === 'object' && h.parent_hub ? h.parent_hub : null;
   return {
     id: h._id,
     name: h.hub_name,
@@ -131,6 +133,12 @@ export function mapHub(h: ApiHub): Hub {
     managerName: hubManager?.full_name ?? h.manager_name,
     isActive: h.is_active !== false,
     createdDate: toDateStr(h.createdAt) || new Date().toISOString().split('T')[0],
+    locationType: h.location_type === 'rsp' ? 'rsp' : 'hub',
+    parentHubId:
+      parentHub?._id ??
+      (typeof h.parent_hub === 'string' ? h.parent_hub : undefined),
+    parentHubName: parentHub?.hub_name ?? h.parent_hub_name,
+    childRspCount: h.child_rsp_count ?? 0,
   };
 }
 

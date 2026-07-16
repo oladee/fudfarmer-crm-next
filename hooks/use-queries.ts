@@ -45,6 +45,9 @@ import {
   InventoryImportResult,
   CustomerImportValidateResponse,
   CustomerImportResult,
+  ApiInventoryRequest,
+  ApiInventoryRequestLine,
+  InventoryRequestStatus,
 } from '@/types/api';
 import {
   mapCreditCustomerSummary,
@@ -389,6 +392,8 @@ export function useCreateHub() {
       hub_phone?: string;
       hub_manager?: string;
       is_active?: boolean;
+      location_type?: 'hub' | 'rsp';
+      parent_hub?: string | null;
     }) => {
       requireApi();
       const res = await axiosPost(
@@ -399,6 +404,8 @@ export function useCreateHub() {
           hub_phone: dto.hub_phone?.trim() || '-',
           hub_manager: dto.hub_manager,
           is_active: dto.is_active ?? true,
+          location_type: dto.location_type,
+          parent_hub: dto.parent_hub,
         },
         true,
       ) as ApiListResponse<ApiHub>;
@@ -421,9 +428,51 @@ export function useUpdateHub() {
       hub_phone?: string;
       hub_manager?: string | null;
       is_active?: boolean;
+      location_type?: 'hub' | 'rsp';
+      parent_hub?: string | null;
     }) => {
       requireApi();
       const res = await axiosPatch(`hub/${id}`, dto, true) as ApiListResponse<ApiHub>;
+      return mapHub(res.data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hubs'] }),
+  });
+}
+
+export function useUpgradeHub() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      requireApi();
+      const res = await axiosPatch(`hub/${id}/upgrade`, {}, true) as ApiListResponse<ApiHub>;
+      return mapHub(res.data);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hubs'] }),
+  });
+}
+
+export function useDowngradeHub() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      child_rsp_actions,
+      manager_action,
+      reassign_hub_id,
+      parent_hub_id,
+    }: {
+      id: string;
+      child_rsp_actions: { rsp_id: string; action: 'reassign' | 'standalone'; target_hub_id?: string }[];
+      manager_action: 'keep' | 'reassign';
+      reassign_hub_id?: string;
+      parent_hub_id?: string | null;
+    }) => {
+      requireApi();
+      const res = await axiosPatch(
+        `hub/${id}/downgrade`,
+        { child_rsp_actions, manager_action, reassign_hub_id, parent_hub_id },
+        true,
+      ) as ApiListResponse<ApiHub>;
       return mapHub(res.data);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hubs'] }),
@@ -1257,6 +1306,100 @@ export function useBatchStockUpdate() {
       qc.invalidateQueries({ queryKey: ['stockLogs'] });
       qc.invalidateQueries({ queryKey: ['inventory'] });
     },
+  });
+}
+
+export interface InventoryRequestFilters {
+  status?: InventoryRequestStatus;
+  requesting_location?: string;
+  fulfilling_hub?: string;
+}
+
+export function useInventoryRequests(filters?: InventoryRequestFilters) {
+  return useQuery({
+    queryKey: ['inventoryRequests', filters],
+    queryFn: async () => {
+      if (!HAS_API) return [] as ApiInventoryRequest[];
+      const params = new URLSearchParams();
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.requesting_location) params.set('requesting_location', filters.requesting_location);
+      if (filters?.fulfilling_hub) params.set('fulfilling_hub', filters.fulfilling_hub);
+      const qs = params.toString();
+      const path = qs ? `inventory/requests?${qs}` : 'inventory/requests';
+      const res = await axiosGet(path, true) as ApiListResponse<ApiInventoryRequest[]>;
+      return res.data ?? [];
+    },
+  });
+}
+
+export function useCreateInventoryRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (dto: {
+      requesting_location: string;
+      fulfilling_hub: string;
+      lines: ApiInventoryRequestLine[];
+      notes?: string;
+    }) => {
+      requireApi();
+      const res = await axiosPost('inventory/requests', dto, true) as ApiListResponse<ApiInventoryRequest>;
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventoryRequests'] });
+    },
+  });
+}
+
+export function useApproveInventoryRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      requireApi();
+      const res = await axiosPatch(`inventory/requests/${id}/approve`, {}, true) as ApiListResponse<ApiInventoryRequest>;
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventoryRequests'] }),
+  });
+}
+
+export function useRejectInventoryRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, rejection_reason }: { id: string; rejection_reason: string }) => {
+      requireApi();
+      const res = await axiosPatch(`inventory/requests/${id}/reject`, { rejection_reason }, true) as ApiListResponse<ApiInventoryRequest>;
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventoryRequests'] }),
+  });
+}
+
+export function useFulfillInventoryRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      requireApi();
+      const res = await axiosPatch(`inventory/requests/${id}/fulfill`, {}, true) as ApiListResponse<ApiInventoryRequest>;
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventoryRequests'] });
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['stockLogs'] });
+    },
+  });
+}
+
+export function useCancelInventoryRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      requireApi();
+      const res = await axiosPatch(`inventory/requests/${id}/cancel`, {}, true) as ApiListResponse<ApiInventoryRequest>;
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventoryRequests'] }),
   });
 }
 

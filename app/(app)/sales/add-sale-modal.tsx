@@ -207,14 +207,19 @@ export function AddSaleModal({
             </div>
           )}
 
+          {!isHistoricalSale && !isMealSale && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
+              Sales are recorded separately from stock. Inventory is updated via adjustments, imports, and transfers.
+            </div>
+          )}
           {isHistoricalSale && !isMealSale && (
             <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-              Historical sale — stock will not be deducted. Enter amount and product description if not using catalog.
+              Historical sale — enter amount and product description if not using catalog.
             </div>
           )}
           {isMealSale && (
             <div className="rounded-md border border-pink-200 bg-pink-50 p-3 text-sm text-pink-900">
-              Meal sale — category Kitchen, unit Food plate. No stock deduction.
+              Meal sale — category Kitchen, unit Food plate.
             </div>
           )}
 
@@ -226,7 +231,7 @@ export function AddSaleModal({
             <select id="sale-product" value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={`${INPUT_CLS} ${touched.productId && validationErrors.productId ? 'border-red-500' : ''}`}>
               <option value="">-- Select Product --</option>
               <option value="__meal__">Record a meal…</option>
-              {availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name} (Stock: {i.currentStock} {i.unitOfMeasure})</option>)}
+              {availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
             {touched.productId && validationErrors.productId && <p className="text-xs text-red-500">{validationErrors.productId}</p>}
             {isMealSale && (
@@ -282,9 +287,7 @@ export function AddSaleModal({
             )}
             {selectedInventoryItem && !isMealSale && (
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <span className={`font-medium ${selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel ? 'text-red-600' : 'text-green-600'}`}>
-                  {selectedInventoryItem.currentStock} {selectedInventoryItem.unitOfMeasure} in stock
-                </span>
+                <span>Catalog ref: {selectedInventoryItem.currentStock} {selectedInventoryItem.unitOfMeasure} on hand (informational)</span>
                 {isCartonProduct && selectedInventoryItem.cartonWeight ? (
                   <span>&middot; {selectedInventoryItem.cartonWeight} Kg / carton</span>
                 ) : null}
@@ -330,11 +333,6 @@ export function AddSaleModal({
                 className={`${INPUT_CLS} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`}
               />
               {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
-              {isCartonProduct && !isMealSale && saleUnit === 'Kg' && selectedInventoryItem?.cartonWeight ? (
-                <p className="text-xs text-muted-foreground">
-                  Deducts {(quantity / selectedInventoryItem.cartonWeight).toFixed(4)} cartons from stock
-                </p>
-              ) : null}
             </div>
             <div className="space-y-2">
               <label htmlFor="sale-amount" className={LABEL_CLS}>Amount ({NAIRA}){isHistoricalSale || isMealSale ? ' *' : ''}</label>

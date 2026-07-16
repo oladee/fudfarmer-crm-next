@@ -11,6 +11,8 @@ export enum Location {
   NASARAWA = 'Nasarawa',
 }
 
+export type LocationType = 'hub' | 'rsp';
+
 export interface Hub {
   id: string;
   name: string;
@@ -20,6 +22,10 @@ export interface Hub {
   managerName?: string;
   isActive: boolean;
   createdDate: string;
+  locationType: LocationType;
+  parentHubId?: string | null;
+  parentHubName?: string;
+  childRspCount?: number;
 }
 
 export enum SalesChannel {

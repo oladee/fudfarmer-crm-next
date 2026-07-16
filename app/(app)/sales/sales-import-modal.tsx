@@ -150,12 +150,13 @@ export function SalesImportModal({
           {allCustom ? (
             <>
               <p><strong>Custom template:</strong> product_description + amount required.</p>
-              <p>Custom product rows never deduct stock, regardless of sale date.</p>
+              <p>Sales never affect stock.</p>
             </>
           ) : (
             <>
-              <p><strong>Live (today+):</strong> product_name + quantity required; stock is deducted.</p>
-              <p><strong>Historical (before today):</strong> amount required; product optional free text; no stock impact.</p>
+              <p><strong>Live (today+):</strong> product_name + quantity required; amount from catalog.</p>
+              <p><strong>Historical (before today):</strong> amount required; product optional free text.</p>
+              <p>Sales never affect stock — use inventory adjustments and transfers instead.</p>
             </>
           )}
           <p className="mt-2">Each upload supports up to <strong>500 data rows</strong>. Re-download the template if dropdowns stop after row 501.</p>

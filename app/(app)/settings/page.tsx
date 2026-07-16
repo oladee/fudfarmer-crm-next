@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, type SubmitEvent } from 'rea
 import { useAuth } from '@/contexts/auth-context';
 import {
   useAgents, useCreateAgent, useUpdateAgent, useDeleteAgent,
-  useHubs, useCreateHub, useUpdateHub, useDeleteHub,
+  useHubs, useCreateHub, useUpdateHub, useDeleteHub, useUpgradeHub, useDowngradeHub,
   useRoles, useCreateRole, useUpdateRole, useDeleteRole, useResetPassword, useUpdateProfile,
 } from '@/hooks/use-queries';
 import { usePermissions } from '@/hooks/use-permissions';
@@ -67,6 +67,8 @@ export default function SettingsPage() {
   const createHub = useCreateHub();
   const updateHub = useUpdateHub();
   const deleteHub = useDeleteHub();
+  const upgradeHub = useUpgradeHub();
+  const downgradeHub = useDowngradeHub();
   const updateRole = useUpdateRole();
   const createRole = useCreateRole();
   const deleteRole = useDeleteRole();
@@ -95,6 +97,7 @@ export default function SettingsPage() {
   const canResetData = can('settings.reset_data');
 
   const activeHubs = hubs.filter((h) => h.isActive);
+  const hubOnlyLocations = activeHubs.filter((h) => h.locationType === 'hub');
 
   const [activeTab, setActiveTab] = useState<'Profile' | 'Users' | 'Hubs' | 'Roles & Permissions' | 'Preferences' | 'Data'>('Profile');
   const [name, setName] = useState(user?.name || '');
@@ -111,7 +114,18 @@ export default function SettingsPage() {
 
   // Hub management state
   const [showHubModal, setShowHubModal] = useState(false);
-  const [editingHub, setEditingHub] = useState<Partial<Hub>>({ isActive: true });
+  const [editingHub, setEditingHub] = useState<Partial<Hub>>({ isActive: true, locationType: 'hub' });
+  const [hubTypeFilter, setHubTypeFilter] = useState<'all' | 'hub' | 'rsp'>('all');
+  const [downgradingHub, setDowngradingHub] = useState<Hub | null>(null);
+  const [downgradeManagerAction, setDowngradeManagerAction] = useState<'keep' | 'reassign'>('keep');
+  const [downgradeReassignHubId, setDowngradeReassignHubId] = useState('');
+  const [downgradeParentHubId, setDowngradeParentHubId] = useState('');
+  const [childRspActions, setChildRspActions] = useState<Record<string, { action: 'reassign' | 'standalone'; target_hub_id?: string }>>({});
+
+  const filteredHubs = useMemo(() => {
+    if (hubTypeFilter === 'all') return hubs;
+    return hubs.filter((h) => h.locationType === hubTypeFilter);
+  }, [hubs, hubTypeFilter]);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [newRole, setNewRole] = useState({ label: '', description: '' });
 
@@ -265,6 +279,8 @@ export default function SettingsPage() {
           hub_phone: editingHub.phone,
           hub_manager: hubManager,
           is_active: editingHub.isActive,
+          location_type: editingHub.locationType,
+          parent_hub: editingHub.locationType === 'rsp' ? (editingHub.parentHubId || null) : null,
         });
       } else {
         const hubName = editingHub.name ?? '';
@@ -274,10 +290,12 @@ export default function SettingsPage() {
           hub_phone: editingHub.phone,
           hub_manager: hubManager || undefined,
           is_active: editingHub.isActive !== false,
+          location_type: editingHub.locationType ?? 'hub',
+          parent_hub: editingHub.locationType === 'rsp' ? (editingHub.parentHubId || null) : null,
         });
       }
       setShowHubModal(false);
-      setEditingHub({ isActive: true });
+      setEditingHub({ isActive: true, locationType: 'hub' });
       toast.success('Hub saved.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save hub.');
@@ -295,6 +313,50 @@ export default function SettingsPage() {
 
   const handleDeleteHub = (id: string) => {
     setConfirmAction({ type: 'deleteHub', payload: id });
+  };
+
+  const openDowngradeModal = (hub: Hub) => {
+    const children = hubs.filter((h) => h.parentHubId === hub.id);
+    const actions: Record<string, { action: 'reassign' | 'standalone'; target_hub_id?: string }> = {};
+    for (const child of children) {
+      actions[child.id] = { action: 'standalone' };
+    }
+    setChildRspActions(actions);
+    setDowngradeManagerAction('keep');
+    setDowngradeReassignHubId('');
+    setDowngradeParentHubId('');
+    setDowngradingHub(hub);
+  };
+
+  const handleConfirmDowngrade = async () => {
+    if (!downgradingHub) return;
+    const children = hubs.filter((h) => h.parentHubId === downgradingHub.id);
+    try {
+      await downgradeHub.mutateAsync({
+        id: downgradingHub.id,
+        child_rsp_actions: children.map((c) => ({
+          rsp_id: c.id,
+          action: childRspActions[c.id]?.action ?? 'standalone',
+          target_hub_id: childRspActions[c.id]?.target_hub_id,
+        })),
+        manager_action: downgradeManagerAction,
+        reassign_hub_id: downgradeManagerAction === 'reassign' ? downgradeReassignHubId : undefined,
+        parent_hub_id: downgradeParentHubId || null,
+      });
+      setDowngradingHub(null);
+      toast.success(`"${downgradingHub.name}" downgraded to RSP.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to downgrade hub.');
+    }
+  };
+
+  const handleUpgradeHub = async (hub: Hub) => {
+    try {
+      await upgradeHub.mutateAsync(hub.id);
+      toast.success(`"${hub.name}" upgraded to Hub.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upgrade location.');
+    }
   };
 
   // ── Roles & Permissions ──
@@ -508,57 +570,88 @@ export default function SettingsPage() {
       {activeTab === 'Hubs' && (
         <div className="space-y-5">
           <div className="rounded-xl border bg-card p-6 shadow-sm space-y-4">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
               <div>
-                <h3 className="font-bold flex items-center gap-2"><Building2 size={18} /> Hub Locations</h3>
+                <h3 className="font-bold flex items-center gap-2"><Building2 size={18} /> Hubs &amp; RSPs</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">{formatHubCountLabel(activeHubs.length, hubs.length)}</p>
               </div>
-              {canManageHubs && <button onClick={() => { setEditingHub({ isActive: true }); setShowHubModal(true); }} className={btnPrimary}><Plus size={14} className="mr-2" /> Add Hub</button>}
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={hubTypeFilter}
+                  onChange={(e) => setHubTypeFilter(e.target.value as 'all' | 'hub' | 'rsp')}
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="all">All locations</option>
+                  <option value="hub">Hubs only</option>
+                  <option value="rsp">RSPs only</option>
+                </select>
+                {canManageHubs && (
+                  <button onClick={() => { setEditingHub({ isActive: true, locationType: 'hub' }); setShowHubModal(true); }} className={btnPrimary}>
+                    <Plus size={14} className="mr-2" /> Add Location
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {hubs.map((hub) => {
-                const hubAgents = agents.filter((a) => a.location === hub.name);
-                return (
-                  <div key={hub.id} className={`rounded-lg border p-4 space-y-3 transition-opacity ${hub.isActive ? '' : 'opacity-50'}`}>
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2">
-                        <MapPin size={16} className={hub.isActive ? 'text-primary' : 'text-muted-foreground'} />
-                        <div>
-                          <h4 className="font-semibold">{hub.name}</h4>
-                          {hub.address && <p className="text-xs text-muted-foreground">{hub.address}</p>}
-                        </div>
-                      </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${hub.isActive ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
-                        {hub.isActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      {hub.phone && (
-                        <div><span className="text-muted-foreground">Phone:</span> <span className="font-medium">{hub.phone}</span></div>
-                      )}
-                      {hub.managerName && (
-                        <div><span className="text-muted-foreground">Manager:</span> <span className="font-medium">{hub.managerName}</span></div>
-                      )}
-                      <div><span className="text-muted-foreground">Team:</span> <span className="font-medium">{hubAgents.length}</span></div>
-                      <div><span className="text-muted-foreground">Since:</span> <span className="font-medium">{hub.createdDate}</span></div>
-                    </div>
-
-                    {canManageHubs && (
-                      <div className="flex items-center gap-2 pt-2 border-t">
-                        <button onClick={() => { setEditingHub(hub); setShowHubModal(true); }} className="text-xs font-medium text-primary hover:underline flex items-center gap-1"><Pencil size={12} /> Edit</button>
-                        <button onClick={() => handleToggleHub(hub)} className="text-xs font-medium text-muted-foreground hover:underline">
-                          {hub.isActive ? 'Deactivate' : 'Activate'}
-                        </button>
-                        {hubAgents.length === 0 && (
-                          <button onClick={() => handleDeleteHub(hub.id)} className="text-xs font-medium text-destructive hover:underline flex items-center gap-1 ml-auto"><Trash2 size={12} /> Delete</button>
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                    <th className="p-3 font-medium">Name</th>
+                    <th className="p-3 font-medium">Type</th>
+                    <th className="p-3 font-medium">Parent Hub</th>
+                    <th className="p-3 font-medium">Manager</th>
+                    <th className="p-3 font-medium">Children</th>
+                    <th className="p-3 font-medium">Status</th>
+                    {canManageHubs && <th className="p-3 font-medium">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredHubs.map((hub) => {
+                    const hubAgents = agents.filter((a) => a.location === hub.name);
+                    return (
+                      <tr key={hub.id} className={`border-b last:border-0 ${hub.isActive ? '' : 'opacity-50'}`}>
+                        <td className="p-3">
+                          <div className="font-medium">{hub.name}</div>
+                          {hub.address && <div className="text-xs text-muted-foreground">{hub.address}</div>}
+                        </td>
+                        <td className="p-3">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${hub.locationType === 'hub' ? 'bg-cyan-100 text-cyan-800' : 'bg-slate-100 text-slate-700'}`}>
+                            {hub.locationType === 'hub' ? 'Hub' : 'RSP'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-muted-foreground">{hub.parentHubName ?? '—'}</td>
+                        <td className="p-3">{hub.managerName ?? '—'}</td>
+                        <td className="p-3">{hub.locationType === 'hub' ? (hub.childRspCount ?? 0) : '—'}</td>
+                        <td className="p-3">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${hub.isActive ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}`}>
+                            {hub.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        {canManageHubs && (
+                          <td className="p-3">
+                            <div className="flex flex-wrap gap-2">
+                              <button onClick={() => { setEditingHub(hub); setShowHubModal(true); }} className="text-xs text-primary hover:underline">Edit</button>
+                              <button onClick={() => handleToggleHub(hub)} className="text-xs text-muted-foreground hover:underline">
+                                {hub.isActive ? 'Deactivate' : 'Activate'}
+                              </button>
+                              {hub.locationType === 'rsp' && (
+                                <button onClick={() => handleUpgradeHub(hub)} className="text-xs text-cyan-700 hover:underline">Upgrade</button>
+                              )}
+                              {hub.locationType === 'hub' && (
+                                <button onClick={() => openDowngradeModal(hub)} className="text-xs text-amber-700 hover:underline">Downgrade</button>
+                              )}
+                              {hubAgents.length === 0 && (
+                                <button onClick={() => handleDeleteHub(hub.id)} className="text-xs text-destructive hover:underline">Delete</button>
+                              )}
+                            </div>
+                          </td>
                         )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
 
             {!canManageHubs && (
@@ -830,12 +923,46 @@ export default function SettingsPage() {
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">{editingHub.id ? 'Edit Hub' : 'Add New Hub'}</h2>
+              <h2 className="text-lg font-bold">{editingHub.id ? 'Edit Location' : 'Add New Location'}</h2>
               <button onClick={() => setShowHubModal(false)} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
             </div>
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label htmlFor="hub-type" className={labelCls}>Type</label>
+                  <select
+                    id="hub-type"
+                    value={editingHub.locationType ?? 'hub'}
+                    onChange={(e) => setEditingHub({
+                      ...editingHub,
+                      locationType: e.target.value as Hub['locationType'],
+                      parentHubId: e.target.value === 'hub' ? undefined : editingHub.parentHubId,
+                    })}
+                    className={inputCls}
+                  >
+                    <option value="hub">Hub</option>
+                    <option value="rsp">RSP</option>
+                  </select>
+                </div>
+                {editingHub.locationType === 'rsp' && (
+                  <div className="space-y-2">
+                    <label htmlFor="hub-parent" className={labelCls}>Parent Hub</label>
+                    <select
+                      id="hub-parent"
+                      value={editingHub.parentHubId ?? ''}
+                      onChange={(e) => setEditingHub({ ...editingHub, parentHubId: e.target.value || undefined })}
+                      className={inputCls}
+                    >
+                      <option value="">Standalone</option>
+                      {hubOnlyLocations.filter((h) => h.id !== editingHub.id).map((h) => (
+                        <option key={h.id} value={h.id}>{h.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
               <div className="space-y-2">
-                <label htmlFor="hub-name" className={labelCls}>Hub Name *</label>
+                <label htmlFor="hub-name" className={labelCls}>Location Name *</label>
                 <input id="hub-name" type="text" value={editingHub.name || ''} onChange={(e) => setEditingHub({ ...editingHub, name: e.target.value })} placeholder="e.g. Abuja" className={inputCls} />
               </div>
               <div className="space-y-2">
@@ -870,6 +997,104 @@ export default function SettingsPage() {
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowHubModal(false)} className={btnSecondary}>Cancel</button>
               <SubmitButton onClick={handleSaveHub} loading={createHub.isPending || updateHub.isPending}>Save Hub</SubmitButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════ DOWNGRADE HUB MODAL ══════ */}
+      {downgradingHub && (
+        <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-xl border bg-card p-6 shadow-xl space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-bold">Downgrade &quot;{downgradingHub.name}&quot; to RSP</h2>
+              <button onClick={() => setDowngradingHub(null)} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
+            </div>
+
+            {hubs.filter((h) => h.parentHubId === downgradingHub.id).length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Child RSP disposition</p>
+                {hubs.filter((h) => h.parentHubId === downgradingHub.id).map((child) => (
+                  <div key={child.id} className="rounded-md border p-3 space-y-2 text-sm">
+                    <p className="font-medium">{child.name}</p>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          checked={childRspActions[child.id]?.action === 'standalone'}
+                          onChange={() => setChildRspActions({ ...childRspActions, [child.id]: { action: 'standalone' } })}
+                        />
+                        Standalone
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          checked={childRspActions[child.id]?.action === 'reassign'}
+                          onChange={() => setChildRspActions({ ...childRspActions, [child.id]: { action: 'reassign', target_hub_id: hubOnlyLocations[0]?.id } })}
+                        />
+                        Reassign to hub
+                      </label>
+                    </div>
+                    {childRspActions[child.id]?.action === 'reassign' && (
+                      <select
+                        value={childRspActions[child.id]?.target_hub_id ?? ''}
+                        onChange={(e) => setChildRspActions({
+                          ...childRspActions,
+                          [child.id]: { action: 'reassign', target_hub_id: e.target.value },
+                        })}
+                        className={inputCls}
+                      >
+                        {hubOnlyLocations.filter((h) => h.id !== downgradingHub.id).map((h) => (
+                          <option key={h.id} value={h.id}>{h.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Manager</p>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="radio" checked={downgradeManagerAction === 'keep'} onChange={() => setDowngradeManagerAction('keep')} />
+                Keep as manager on this RSP
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="radio" checked={downgradeManagerAction === 'reassign'} onChange={() => setDowngradeManagerAction('reassign')} />
+                Reassign manager to another Hub
+              </label>
+              {downgradeManagerAction === 'reassign' && (
+                <select
+                  value={downgradeReassignHubId}
+                  onChange={(e) => setDowngradeReassignHubId(e.target.value)}
+                  className={inputCls}
+                >
+                  <option value="">Select target hub</option>
+                  {hubOnlyLocations.filter((h) => h.id !== downgradingHub.id).map((h) => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className={labelCls}>Place this RSP under hub (optional)</label>
+              <select
+                value={downgradeParentHubId}
+                onChange={(e) => setDowngradeParentHubId(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">Standalone RSP</option>
+                {hubOnlyLocations.filter((h) => h.id !== downgradingHub.id).map((h) => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setDowngradingHub(null)} className={btnSecondary}>Cancel</button>
+              <SubmitButton onClick={handleConfirmDowngrade} loading={downgradeHub.isPending}>Confirm downgrade</SubmitButton>
             </div>
           </div>
         </div>

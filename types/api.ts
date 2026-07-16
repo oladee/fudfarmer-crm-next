@@ -118,6 +118,45 @@ export interface ApiHub {
   manager_name?: string;
   is_active?: boolean;
   createdAt?: string;
+  location_type?: 'hub' | 'rsp';
+  parent_hub?: string | { _id: string; hub_name?: string } | null;
+  parent_hub_name?: string;
+  child_rsp_count?: number;
+}
+
+export type InventoryRequestStatus =
+  | 'draft'
+  | 'submitted'
+  | 'approved'
+  | 'fulfilled'
+  | 'rejected'
+  | 'cancelled';
+
+export interface ApiInventoryRequestLine {
+  product_id?: string;
+  product_name: string;
+  sku?: string;
+  quantity: number;
+  uom: string;
+  notes?: string;
+}
+
+export interface ApiInventoryRequest {
+  _id: string;
+  requesting_location: string | { _id: string; hub_name?: string; location_type?: string };
+  fulfilling_hub: string | { _id: string; hub_name?: string; location_type?: string };
+  status: InventoryRequestStatus;
+  lines: ApiInventoryRequestLine[];
+  requested_by: string;
+  requested_by_name?: string;
+  reviewed_by?: string;
+  reviewed_by_name?: string;
+  fulfilled_by?: string;
+  fulfilled_by_name?: string;
+  notes?: string;
+  rejection_reason?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ApiSegment {
