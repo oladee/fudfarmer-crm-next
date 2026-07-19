@@ -38,8 +38,6 @@ function SalesTableRow({ sale, onSelect }: SalesTableRowProps) {
       className={`hover:bg-muted/50 cursor-pointer group ${sale.status === 'Voided' ? 'opacity-50' : ''}`}
     >
       <td className="p-4 text-muted-foreground whitespace-nowrap">{sale.date}</td>
-      <td className="p-4 text-muted-foreground whitespace-nowrap text-xs">{sale.createdAt || '—'}</td>
-      <td className="p-4 text-muted-foreground whitespace-nowrap text-xs">{sale.updatedAt || '—'}</td>
       <td className="p-4">
         <span className="font-medium">{sale.customerName}</span>
         {sale.channel && sale.channel !== SalesChannel.WALK_IN && (
@@ -293,8 +291,6 @@ export default function SalesPage() {
             <thead className="bg-muted/50 border-b">
               <tr>
                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">Date Sold</th>
-                <th className="h-12 px-4 text-left font-medium text-muted-foreground">Date Recorded</th>
-                <th className="h-12 px-4 text-left font-medium text-muted-foreground">Last Updated</th>
                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">Customer</th>
                 <th className="h-12 px-4 text-left font-medium text-muted-foreground">Product Name</th>
                 <th className="h-12 px-4 text-center font-medium text-muted-foreground">Quantity</th>
@@ -310,10 +306,10 @@ export default function SalesPage() {
                 <SalesTableRow key={sale.id} sale={sale} onSelect={openSaleDetail} />
               ))}
               {filteredSales.length === 0 && !tableLoading && (
-                <tr><td colSpan={11} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>
+                <tr><td colSpan={9} className="p-12 text-center text-muted-foreground italic">No sales match your filters.</td></tr>
               )}
               {tableLoading && (
-                <tr><td colSpan={11} className="p-12 text-center text-muted-foreground italic">Loading sales...</td></tr>
+                <tr><td colSpan={9} className="p-12 text-center text-muted-foreground italic">Loading sales...</td></tr>
               )}
             </tbody>
           </table>

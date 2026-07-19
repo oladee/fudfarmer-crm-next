@@ -614,8 +614,6 @@ export function useSalesPage() {
   const handleExport = () => {
     const headers = [
       'Date Sold',
-      'Date Recorded',
-      'Last Updated',
       'Customer',
       'Product Name',
       'Quantity',
@@ -633,8 +631,6 @@ export function useSalesPage() {
     ];
     const rows = filteredSales.map((s) => [
       s.date,
-      s.createdAt || '',
-      s.updatedAt || '',
       s.customerName,
       s.item?.productName || '',
       s.item?.quantity ?? '',
