@@ -16,6 +16,7 @@ import {
 } from '@/hooks/use-queries';
 import type { ApiInventoryRequest, InventoryRequestStatus } from '@/types/api';
 import { Hub } from '@/types';
+import { hubOptionLabel } from '@/lib/api-mappers';
 import { SubmitButton } from '@/components/submit-button';
 import { toast } from 'sonner';
 import { Plus, Package, Check, X, Truck, Ban } from 'lucide-react';
@@ -196,7 +197,7 @@ export function InventoryRequestsPanel() {
               >
                 {rspLocations.map((h: Hub) => (
                   <option key={h.id} value={h.id}>
-                    {h.name} ({h.locationType === 'hub' ? 'Hub' : 'RSP'})
+                    {hubOptionLabel(h)}
                   </option>
                 ))}
               </select>
@@ -214,8 +215,7 @@ export function InventoryRequestsPanel() {
                 <option value="">Select hub</option>
                 {hubLocations.map((h) => (
                   <option key={h.id} value={h.id}>
-                    {h.name}
-                    {h.id === suggestedHub ? ' (Suggested)' : ''}
+                    {hubOptionLabel(h, h.id === suggestedHub ? '(Suggested)' : undefined)}
                   </option>
                 ))}
               </select>

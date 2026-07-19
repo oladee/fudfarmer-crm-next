@@ -13,6 +13,7 @@ import {
 } from '@/types';
 import type { AppUser } from '@/types/api';
 import type { HubScopeFilter } from '@/hooks/use-hub-scope';
+import { hubOptionLabel } from '@/lib/api-mappers';
 import { fmt, NAIRA, INPUT_CLS, LABEL_CLS, BTN_PRIMARY, BTN_SECONDARY } from './sales-utils';
 import { ModalDialog } from './modal-dialog';
 import { SearchableCustomerSelect } from '@/components/searchable-customer-select';
@@ -131,7 +132,9 @@ export function AddSaleModal({
               <label htmlFor="sale-hub" className={LABEL_CLS}>Hub Location</label>
               {canCreateSale ? (
                 <select id="sale-hub" value={selectedHub} onChange={(e) => { setSelectedHub(e.target.value); setSelectedProductId(''); }} className={INPUT_CLS}>
-                  {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                  {hubScope.activeHubs.map((h) => (
+                    <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
+                  ))}
                 </select>
               ) : (
                 <input id="sale-hub" type="text" readOnly disabled value={hubScope.hubName} className={`${INPUT_CLS} opacity-80 cursor-not-allowed`} />

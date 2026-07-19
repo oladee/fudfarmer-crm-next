@@ -18,6 +18,7 @@ import type { InventoryImportPreviewRow } from '@/types/api';
 import { PRODUCT_CATEGORIES } from '@/lib/product-categories';
 import { InventoryImportModal } from './inventory-import-modal';
 import { InventoryRequestsPanel } from './inventory-requests-panel';
+import { hubOptionLabel } from '@/lib/api-mappers';
 import { toast } from 'sonner';
 import {
   Plus, Box, Search, History, Package, AlertTriangle, Truck, Layers,
@@ -1541,7 +1542,9 @@ export default function InventoryPage() {
                 <label className={labelCls}>Location Hub</label>
                 {hubScope.canSwitchHubs ? (
                   <select value={newProduct.location} onChange={(e) => setNewProduct({ ...newProduct, location: e.target.value })} className={inputCls}>
-                    {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                    {hubScope.activeHubs.map((h) => (
+                      <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
+                    ))}
                   </select>
                 ) : (
                   <input type="text" readOnly disabled value={hubScope.hubName} className={`${inputCls} opacity-80 cursor-not-allowed`} />
@@ -1599,7 +1602,9 @@ export default function InventoryPage() {
                 <label className={labelCls}>Location Hub</label>
                 {hubScope.canSwitchHubs ? (
                   <select value={editProduct.location} onChange={(e) => setEditProduct({ ...editProduct, location: e.target.value })} className={inputCls}>
-                    {hubScope.activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}
+                    {hubScope.activeHubs.map((h) => (
+                      <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
+                    ))}
                   </select>
                 ) : (
                   <input type="text" readOnly disabled value={editProduct.location || hubScope.hubName} className={`${inputCls} opacity-80 cursor-not-allowed`} />
@@ -1763,7 +1768,7 @@ export default function InventoryPage() {
                   >
                     <option value="">Select destination...</option>
                     {activeHubs.filter((h) => h.name !== selectedProduct.location).map((h) => (
-                      <option key={h.id} value={h.name}>{h.name}</option>
+                      <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
                     ))}
                   </select>
                 </div>

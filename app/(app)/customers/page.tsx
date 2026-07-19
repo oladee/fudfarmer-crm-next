@@ -21,6 +21,7 @@ import {
 import { CustomerImportModal } from './customer-import-modal';
 import { toast } from 'sonner';
 import { isPlaceholderEmail, isB2bCustomerType, customerPhoneForApi } from '@/lib/customer-helpers';
+import { hubOptionLabel } from '@/lib/api-mappers';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
@@ -726,7 +727,9 @@ export default function CustomersPage() {
               )}
               <div className="space-y-2"><label className="text-sm font-medium">Location</label>
                 <select value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                  {activeHubs.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
+                  {activeHubs.map((h) => (
+                    <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-2"><label className="text-sm font-medium">Assigned Agent</label><select value={newCustomer.addedByAgentId || ''} onChange={(e) => setNewCustomer({ ...newCustomer, addedByAgentId: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">-- Select --</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
@@ -1066,7 +1069,9 @@ export default function CustomersPage() {
                     <div className="space-y-1.5">
                       <label className="text-xs font-medium text-muted-foreground">Location</label>
                       <select value={editForm.location || hubScope.hubName || activeHubs[0]?.name} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm">
-                        {activeHubs.map((h) => <option key={h.id} value={h.name}>{h.name}</option>)}
+                        {activeHubs.map((h) => (
+                          <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
+                        ))}
                       </select>
                     </div>
                   </div>

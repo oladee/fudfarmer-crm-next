@@ -41,6 +41,18 @@ export function useHubScopeFilter() {
     [canSwitchHubs, activeHubs],
   );
 
+  const hubOptionsDetailed = useMemo(
+    () =>
+      canSwitchHubs
+        ? activeHubs.map((h) => ({
+            id: h.id,
+            name: h.name,
+            locationType: h.locationType,
+          }))
+        : [],
+    [canSwitchHubs, activeHubs],
+  );
+
   const matchesHub = (locationName: string | undefined) =>
     filterHub === 'All' || !locationName || locationName === filterHub;
 
@@ -60,6 +72,7 @@ export function useHubScopeFilter() {
     setFilterHub,
     hubIdForApi,
     hubOptions,
+    hubOptionsDetailed,
     activeHubs,
     matchesHub,
     defaultHubName,

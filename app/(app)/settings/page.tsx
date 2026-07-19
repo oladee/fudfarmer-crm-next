@@ -38,6 +38,7 @@ import {
 } from '@/lib/settings-helpers';
 import { ApiRole } from '@/types/api';
 import { Agent, Hub } from '@/types';
+import { hubOptionLabel } from '@/lib/api-mappers';
 import { toast } from 'sonner';
 import { SubmitButton } from '@/components/submit-button';
 import {
@@ -885,7 +886,7 @@ export default function SettingsPage() {
                       disabled={!canSwitchHubs}
                     >
                       {(canSwitchHubs ? activeHubs : hubs.filter((h) => h.id === scopeHubId || h.name === user?.hubName)).map((h) => (
-                        <option key={h.id} value={h.name}>{h.name}</option>
+                        <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
                       ))}
                     </select>
                   </div>
@@ -955,7 +956,7 @@ export default function SettingsPage() {
                     >
                       <option value="">Standalone</option>
                       {hubOnlyLocations.filter((h) => h.id !== editingHub.id).map((h) => (
-                        <option key={h.id} value={h.id}>{h.name}</option>
+                        <option key={h.id} value={h.id}>{hubOptionLabel(h)}</option>
                       ))}
                     </select>
                   </div>
@@ -1045,7 +1046,7 @@ export default function SettingsPage() {
                         className={inputCls}
                       >
                         {hubOnlyLocations.filter((h) => h.id !== downgradingHub.id).map((h) => (
-                          <option key={h.id} value={h.id}>{h.name}</option>
+                          <option key={h.id} value={h.id}>{hubOptionLabel(h)}</option>
                         ))}
                       </select>
                     )}
@@ -1072,7 +1073,7 @@ export default function SettingsPage() {
                 >
                   <option value="">Select target hub</option>
                   {hubOnlyLocations.filter((h) => h.id !== downgradingHub.id).map((h) => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
+                    <option key={h.id} value={h.id}>{hubOptionLabel(h)}</option>
                   ))}
                 </select>
               )}
@@ -1087,7 +1088,7 @@ export default function SettingsPage() {
               >
                 <option value="">Standalone RSP</option>
                 {hubOnlyLocations.filter((h) => h.id !== downgradingHub.id).map((h) => (
-                  <option key={h.id} value={h.id}>{h.name}</option>
+                  <option key={h.id} value={h.id}>{hubOptionLabel(h)}</option>
                 ))}
               </select>
             </div>

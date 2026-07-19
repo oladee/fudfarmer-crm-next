@@ -86,6 +86,16 @@ export function buildHubMap(hubs: Hub[]): Record<string, string> {
   return Object.fromEntries(hubs.map((h) => [h.id, h.name]));
 }
 
+/** Native <option> label: "Lagos (Hub)" / "Ife (RSP)". Value stays hub.name or hub.id. */
+export function hubOptionLabel(
+  hub: Pick<Hub, 'name' | 'locationType'> | { name: string; locationType?: string },
+  extras?: string,
+): string {
+  const typeLabel = hub.locationType === 'rsp' ? 'RSP' : 'Hub';
+  const base = `${hub.name} (${typeLabel})`;
+  return extras ? `${base} ${extras}` : base;
+}
+
 function resolveHubName(
   location: ApiCustomer['customer_location'] | ApiProduct['hub'],
   hubMap?: Record<string, string>,

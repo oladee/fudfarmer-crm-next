@@ -17,6 +17,7 @@ import { PRODUCT_CATEGORIES } from '@/lib/product-categories';
 
 import type { HubScopeFilter } from '@/hooks/use-hub-scope';
 import type { Hub } from '@/types';
+import { hubOptionLabel } from '@/lib/api-mappers';
 
 export type SaleDetailTabProps = Readonly<{
   sale: Sale;
@@ -254,7 +255,7 @@ function OverviewTab({
               className="h-8 rounded-md border px-2 text-sm bg-background"
             >
               {activeHubs.map((h) => (
-                <option key={h.id} value={h.name}>{h.name}</option>
+                <option key={h.id} value={h.name}>{hubOptionLabel(h)}</option>
               ))}
             </select>
           ) : (
