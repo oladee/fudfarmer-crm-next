@@ -77,7 +77,10 @@ export default function AnalyticsPage() {
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <HubScopeFilterBar scope={hubScope} />
-        <MetricsPeriodBar period={metricsPeriod} />
+        <MetricsPeriodBar
+          period={metricsPeriod}
+          hint="Sales use sale date; customers use createdAt; credits use issue date; feedback & stock moves use their event dates. Product stock levels are a current snapshot."
+        />
       </div>
 
       {!HAS_API ? (
@@ -485,7 +488,7 @@ function ProductPerformance({ data }: { data: AnalyticsOverviewData['products'] 
         <div className="rounded-xl border bg-card shadow-sm">
           <div className="p-5 border-b">
             <h3 className="text-sm font-bold">Stock Turnover</h3>
-            <p className="text-[11px] text-muted-foreground">How fast stock sells through (units sold / current stock)</p>
+            <p className="text-[11px] text-muted-foreground">Units moved in the selected range ÷ current stock (stock level is a live snapshot)</p>
           </div>
           <div className="p-5">
             {stockTurnover.length > 0 ? (
@@ -515,9 +518,9 @@ function ProductPerformance({ data }: { data: AnalyticsOverviewData['products'] 
         <div className="rounded-xl border border-amber-200 bg-amber-50/50 shadow-sm">
           <div className="p-5">
             <h3 className="text-sm font-bold text-amber-800 flex items-center gap-2">
-              <AlertTriangle size={14} /> Dead Stock Alert — {deadStock.length} SKUs with zero sales
+              <AlertTriangle size={14} /> Dead Stock Alert — {deadStock.length} SKUs with zero sales in range
             </h3>
-            <p className="text-[11px] text-amber-700 mb-3">These items have stock on hand but no recorded sales</p>
+            <p className="text-[11px] text-amber-700 mb-3">These items have stock on hand but no sales in the selected date range</p>
             <div className="flex flex-wrap gap-2">
               {deadStock.map((item) => (
                 <span key={item.id} className="text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-full">
