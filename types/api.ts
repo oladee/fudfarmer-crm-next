@@ -136,8 +136,14 @@ export interface ApiInventoryRequestLine {
   product_id?: string;
   product_name: string;
   sku?: string;
+  /** Quantity in the user-selected request unit (`uom`). */
   quantity: number;
+  /** Selected request unit: Carton | Kg | or product catalog UOM. */
   uom: string;
+  /** Catalog Kg-per-carton snapshot for carton products. */
+  carton_weight_kg?: number;
+  /** Normalized quantity in the product inventory unit. */
+  stock_quantity?: number;
   notes?: string;
 }
 

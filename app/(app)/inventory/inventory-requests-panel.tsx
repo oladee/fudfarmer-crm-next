@@ -29,6 +29,29 @@ function hubId(ref: ApiInventoryRequest['requesting_location']) {
   return typeof ref === 'object' && ref ? ref._id : String(ref);
 }
 
+function isCartonsUom(uom?: string) {
+  return (uom ?? '').trim().toLowerCase() === 'cartons';
+}
+
+function formatLineDisplay(line: {
+  product_name: string;
+  quantity: number;
+  uom: string;
+  sku?: string;
+  carton_weight_kg?: number;
+  stock_quantity?: number;
+}) {
+  const sku = line.sku ? ` (${line.sku})` : '';
+  const weight = line.carton_weight_kg;
+  if (weight && weight > 0 && line.uom === 'Carton') {
+    return `${line.product_name} — ${line.quantity} Carton (= ${(line.quantity * weight).toFixed(2)} Kg)${sku}`;
+  }
+  if (weight && weight > 0 && line.uom === 'Kg') {
+    return `${line.product_name} — ${line.quantity} Kg (= ${(line.quantity / weight).toFixed(4)} Carton)${sku}`;
+  }
+  return `${line.product_name} — ${line.quantity} ${line.uom}${sku}`;
+}
+
 const STATUS_STYLES: Record<InventoryRequestStatus, string> = {
   draft: 'bg-muted text-muted-foreground',
   submitted: 'bg-blue-100 text-blue-800',
@@ -62,6 +85,7 @@ export function InventoryRequestsPanel() {
   const [fulfillingHub, setFulfillingHub] = useState('');
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState(1);
+  const [requestUom, setRequestUom] = useState('');
   const [notes, setNotes] = useState('');
   const [statusFilter, setStatusFilter] = useState<InventoryRequestStatus | 'all'>('all');
   const [rejectingId, setRejectingId] = useState<string | null>(null);
@@ -70,6 +94,32 @@ export function InventoryRequestsPanel() {
   const { data: fulfillingInventory = [] } = useInventory({
     hub_id: fulfillingHub || undefined,
   });
+
+  const selectedProduct = useMemo(
+    () => fulfillingInventory.find((p) => p.id === productId),
+    [fulfillingInventory, productId],
+  );
+
+  const isCartonProduct = isCartonsUom(selectedProduct?.unitOfMeasure);
+  const cartonWeight = selectedProduct?.cartonWeight;
+
+  const unitOptions = useMemo(() => {
+    if (!selectedProduct) return [];
+    if (isCartonProduct) return ['Carton', 'Kg'];
+    return [selectedProduct.unitOfMeasure || 'Units'];
+  }, [selectedProduct, isCartonProduct]);
+
+  const conversionPreview = useMemo(() => {
+    if (!selectedProduct || !(quantity > 0)) return null;
+    if (!isCartonProduct || !(cartonWeight && cartonWeight > 0)) return null;
+    if (requestUom === 'Carton') {
+      return `${quantity} Carton = ${(quantity * cartonWeight).toFixed(2)} Kg`;
+    }
+    if (requestUom === 'Kg') {
+      return `${quantity} Kg = ${(quantity / cartonWeight).toFixed(4)} Carton`;
+    }
+    return null;
+  }, [selectedProduct, quantity, isCartonProduct, cartonWeight, requestUom]);
 
   const suggestedHub = useMemo(() => {
     const loc = hubs.find((h) => h.id === requestingLocation);
@@ -85,14 +135,28 @@ export function InventoryRequestsPanel() {
   const canRequest = can('inventory.request');
   const canFulfill = can('inventory.fulfill_requests');
 
+  const selectProduct = (id: string) => {
+    setProductId(id);
+    const product = fulfillingInventory.find((p) => p.id === id);
+    if (!product) {
+      setRequestUom('');
+      return;
+    }
+    setRequestUom(isCartonsUom(product.unitOfMeasure) ? 'Carton' : product.unitOfMeasure);
+  };
+
   const handleCreate = async () => {
-    if (!requestingLocation || !fulfillingHub || !productId || quantity <= 0) {
-      toast.error('Select requesting location, fulfilling hub, product, and quantity.');
+    if (!requestingLocation || !fulfillingHub || !productId || quantity <= 0 || !requestUom) {
+      toast.error('Select requesting location, fulfilling hub, product, quantity, and unit.');
       return;
     }
     const product = fulfillingInventory.find((p) => p.id === productId);
     if (!product) {
       toast.error('Product not found.');
+      return;
+    }
+    if (isCartonsUom(product.unitOfMeasure) && !(product.cartonWeight && product.cartonWeight > 0)) {
+      toast.error('This carton product has no catalog carton weight; cannot request.');
       return;
     }
     try {
@@ -105,7 +169,7 @@ export function InventoryRequestsPanel() {
             product_name: product.name,
             sku: product.sku,
             quantity,
-            uom: product.unitOfMeasure,
+            uom: requestUom,
           },
         ],
         notes: notes.trim() || undefined,
@@ -114,6 +178,7 @@ export function InventoryRequestsPanel() {
       setShowForm(false);
       setProductId('');
       setQuantity(1);
+      setRequestUom('');
       setNotes('');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to submit request.');
@@ -209,6 +274,7 @@ export function InventoryRequestsPanel() {
                 onChange={(e) => {
                   setFulfillingHub(e.target.value);
                   setProductId('');
+                  setRequestUom('');
                 }}
                 className={inputCls}
               >
@@ -224,7 +290,7 @@ export function InventoryRequestsPanel() {
               <label className={labelCls}>Product (from fulfilling hub)</label>
               <select
                 value={productId}
-                onChange={(e) => setProductId(e.target.value)}
+                onChange={(e) => selectProduct(e.target.value)}
                 className={inputCls}
                 disabled={!fulfillingHub}
               >
@@ -247,6 +313,38 @@ export function InventoryRequestsPanel() {
                 className={inputCls}
               />
             </div>
+            <div className="space-y-2">
+              <label className={labelCls}>Unit</label>
+              <select
+                value={requestUom}
+                onChange={(e) => setRequestUom(e.target.value)}
+                className={inputCls}
+                disabled={!selectedProduct}
+              >
+                {!selectedProduct && <option value="">Select product first</option>}
+                {unitOptions.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {isCartonProduct && (
+              <div className="space-y-1 md:col-span-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                {cartonWeight && cartonWeight > 0 ? (
+                  <>
+                    <p>1 carton = {cartonWeight} Kg (from product catalog)</p>
+                    {conversionPreview && (
+                      <p className="font-medium text-foreground">{conversionPreview}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-destructive">
+                    This product has no valid carton weight in the catalog.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="space-y-2 md:col-span-2">
               <label className={labelCls}>Notes (optional)</label>
               <input
@@ -303,10 +401,7 @@ export function InventoryRequestsPanel() {
                   </div>
                   <ul className="text-xs space-y-1">
                     {req.lines.map((line, idx) => (
-                      <li key={idx}>
-                        {line.product_name} — {line.quantity} {line.uom}
-                        {line.sku ? ` (${line.sku})` : ''}
-                      </li>
+                      <li key={idx}>{formatLineDisplay(line)}</li>
                     ))}
                   </ul>
                   {req.notes && (
