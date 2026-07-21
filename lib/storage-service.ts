@@ -2,10 +2,11 @@ import {
   Customer, Feedback, Compensation, Enquiry,
   Agent, Task, Sale, Hub,
   InventoryItem, StockLog, CreditRecord, AuditLog,
+  Supplier, SupplierIssue,
   CustomerType, FeedbackType, FeedbackPriority, Sentiment,
   CompensationCategory, SalesChannel, DeliveryStatus,
   PaymentTerms, StockMovementType, TaskPriority, TaskStatus,
-  EnquiryCategory,
+  EnquiryCategory, SupplierBusinessType, SupplierIssueType,
 } from '../types';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -27,21 +28,21 @@ const INITIAL_AGENTS: Agent[] = [
 
 // ============ CUSTOMERS ============
 const INITIAL_CUSTOMERS: Customer[] = [
-  { id: 'cust-01', name: 'Mama Nkechi Kitchen', email: 'nkechi@gmail.com', phone: '08051234001', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2025-08-15', segments: ['Retail Household', 'Regular Repeater'], totalOrders: 12, totalSpent: 185000, addedByAgentId: 'agent-favour', addedByAgentName: 'M-Favour' },
-  { id: 'cust-02', name: 'Alhaji Musa Stores', email: 'musa.stores@yahoo.com', phone: '08051234002', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Musa Wholesale Ltd', joinedDate: '2025-07-01', segments: ['Wholesale Carton', 'Regular Repeater'], totalOrders: 28, totalSpent: 1450000, addedByAgentId: 'agent-kwed', addedByAgentName: 'M-Kwed' },
-  { id: 'cust-03', name: 'Chef Amara', email: 'amara.chef@gmail.com', phone: '08051234003', type: CustomerType.B2B, location: 'Lagos', companyName: 'Amara Catering Services', joinedDate: '2025-09-10', segments: ['Catering', 'Restaurant'], totalOrders: 8, totalSpent: 520000, addedByAgentId: 'agent-daniel', addedByAgentName: 'M-Daniel' },
-  { id: 'cust-04', name: 'Mrs Folake Adeyemi', email: 'folake.a@outlook.com', phone: '08051234004', type: CustomerType.B2C, location: 'Lagos', joinedDate: '2025-10-01', segments: ['Retail Household'], totalOrders: 3, totalSpent: 42000, addedByAgentId: 'agent-bantel', addedByAgentName: 'M-Bantel' },
-  { id: 'cust-05', name: 'Palace Hotel Nasarawa', email: 'purchasing@palacehotel.ng', phone: '08051234005', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Palace Hotel Group', joinedDate: '2025-06-15', segments: ['Hotel', 'VIP', 'Wholesale Carton'], totalOrders: 35, totalSpent: 2800000, addedByAgentId: 'admin', addedByAgentName: 'Admin' },
-  { id: 'cust-06', name: 'Baba Sule', email: 'sule.baba@gmail.com', phone: '08051234006', type: CustomerType.B2C, location: 'Ife', joinedDate: '2025-11-20', segments: ['Retail Household'], totalOrders: 2, totalSpent: 28000 },
-  { id: 'cust-07', name: 'OAU Staff Canteen', email: 'canteen@oau.edu.ng', phone: '08051234007', type: CustomerType.B2B, location: 'Ife', companyName: 'OAU Canteen Services', joinedDate: '2025-08-01', segments: ['Institutional/Canteen', 'Regular Repeater'], totalOrders: 18, totalSpent: 890000, addedByAgentId: 'agent-testy', addedByAgentName: 'M-Testy' },
-  { id: 'cust-08', name: 'Sister Bimpe', email: 'bimpe.foods@gmail.com', phone: '08051234008', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2026-01-05', segments: ['Retail Household', 'Regular Repeater'], totalOrders: 6, totalSpent: 95000, addedByAgentId: 'agent-favour', addedByAgentName: 'M-Favour' },
-  { id: 'cust-09', name: 'De Choice Restaurant', email: 'info@dechoice.ng', phone: '08051234009', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'De Choice Foods Ltd', joinedDate: '2025-09-20', segments: ['Restaurant', 'Regular Repeater'], totalOrders: 22, totalSpent: 1120000, addedByAgentId: 'agent-kwed', addedByAgentName: 'M-Kwed' },
-  { id: 'cust-10', name: 'Madam Grace', email: 'grace.market@gmail.com', phone: '08051234010', type: CustomerType.B2C, location: 'Lagos', joinedDate: '2025-12-10', segments: ['Retail Household'], totalOrders: 4, totalSpent: 56000, addedByAgentId: 'agent-daniel', addedByAgentName: 'M-Daniel' },
-  { id: 'cust-11', name: 'Lafia Coldroom', email: 'lafia.cold@yahoo.com', phone: '08051234011', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Lafia Coldroom Enterprise', joinedDate: '2025-07-15', segments: ['Wholesale Carton'], totalOrders: 15, totalSpent: 980000, addedByAgentId: 'agent-bantel', addedByAgentName: 'M-Bantel' },
-  { id: 'cust-12', name: 'Mama Ijeoma', email: 'ijeoma@gmail.com', phone: '08051234012', type: CustomerType.B2C, location: 'Ife', joinedDate: '2026-02-01', segments: ['Retail Household'], totalOrders: 1, totalSpent: 14500 },
-  { id: 'cust-13', name: 'FudFarmer Staff', email: 'internal@fudfarmer.com', phone: '08012345678', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2025-06-01', segments: ['Staff'], totalOrders: 10, totalSpent: 75000, addedByAgentId: 'admin', addedByAgentName: 'Admin' },
-  { id: 'cust-14', name: 'Zenith Suya Spot', email: 'zenith.suya@gmail.com', phone: '08051234014', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Zenith Suya Enterprise', joinedDate: '2025-10-15', segments: ['Restaurant', 'Regular Repeater'], totalOrders: 14, totalSpent: 680000, addedByAgentId: 'agent-favour', addedByAgentName: 'M-Favour' },
-  { id: 'cust-15', name: 'Hajiya Zainab', email: 'zainab.h@gmail.com', phone: '08051234015', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2026-03-01', segments: ['Retail Household'], totalOrders: 2, totalSpent: 31000 },
+  { id: 'cust-01', name: 'Mama Nkechi Kitchen', email: 'nkechi@gmail.com', phone: '08051234001', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2025-08-15', segments: ['Retail Household', 'Regular Repeater'], totalOrders: 12, totalSpent: 185000, addedByAgentId: 'agent-favour', addedByAgentName: 'M-Favour', familyType: 'Extended', maritalStatus: 'Married', ageGroup: '36-45', lifestyle: 'Budget-Conscious', employmentStatus: 'Self-Employed', jobType: 'Food Vendor', religion: 'Christian' },
+  { id: 'cust-02', name: 'Alhaji Musa Stores', email: 'musa.stores@yahoo.com', phone: '08051234002', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Musa Wholesale Ltd', joinedDate: '2025-07-01', segments: ['Wholesale Carton', 'Regular Repeater'], totalOrders: 28, totalSpent: 1450000, addedByAgentId: 'agent-kwed', addedByAgentName: 'M-Kwed', businessCategory: 'Retailers' },
+  { id: 'cust-03', name: 'Chef Amara', email: 'amara.chef@gmail.com', phone: '08051234003', type: CustomerType.B2B, location: 'Lagos', companyName: 'Amara Catering Services', joinedDate: '2025-09-10', segments: ['Catering', 'Restaurant'], totalOrders: 8, totalSpent: 520000, addedByAgentId: 'agent-daniel', addedByAgentName: 'M-Daniel', businessCategory: 'Event Planners' },
+  { id: 'cust-04', name: 'Mrs Folake Adeyemi', email: 'folake.a@outlook.com', phone: '08051234004', type: CustomerType.B2C, location: 'Lagos', joinedDate: '2025-10-01', segments: ['Retail Household'], totalOrders: 3, totalSpent: 42000, addedByAgentId: 'agent-bantel', addedByAgentName: 'M-Bantel', familyType: 'Nuclear', maritalStatus: 'Married', ageGroup: '26-35', lifestyle: 'Health-Conscious', employmentStatus: 'Privately Employed', jobType: 'Banker', religion: 'Christian' },
+  { id: 'cust-05', name: 'Palace Hotel Nasarawa', email: 'purchasing@palacehotel.ng', phone: '08051234005', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Palace Hotel Group', joinedDate: '2025-06-15', segments: ['Hotel', 'VIP', 'Wholesale Carton'], totalOrders: 35, totalSpent: 2800000, addedByAgentId: 'admin', addedByAgentName: 'Admin', businessCategory: 'Hospitality' },
+  { id: 'cust-06', name: 'Baba Sule', email: 'sule.baba@gmail.com', phone: '08051234006', type: CustomerType.B2C, location: 'Ife', joinedDate: '2025-11-20', segments: ['Retail Household'], totalOrders: 2, totalSpent: 28000, familyType: 'Polygamy', maritalStatus: 'Married', ageGroup: '46-60', lifestyle: 'Budget-Conscious', employmentStatus: 'Self-Employed', jobType: 'Trader', religion: 'Muslim' },
+  { id: 'cust-07', name: 'OAU Staff Canteen', email: 'canteen@oau.edu.ng', phone: '08051234007', type: CustomerType.B2B, location: 'Ife', companyName: 'OAU Canteen Services', joinedDate: '2025-08-01', segments: ['Institutional/Canteen', 'Regular Repeater'], totalOrders: 18, totalSpent: 890000, addedByAgentId: 'agent-testy', addedByAgentName: 'M-Testy', businessCategory: 'Education Institutions' },
+  { id: 'cust-08', name: 'Sister Bimpe', email: 'bimpe.foods@gmail.com', phone: '08051234008', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2026-01-05', segments: ['Retail Household', 'Regular Repeater'], totalOrders: 6, totalSpent: 95000, addedByAgentId: 'agent-favour', addedByAgentName: 'M-Favour', familyType: 'Monogamy', maritalStatus: 'Single', ageGroup: '26-35', lifestyle: 'Health-Conscious', employmentStatus: 'Self-Employed', jobType: 'Caterer', religion: 'Christian' },
+  { id: 'cust-09', name: 'De Choice Restaurant', email: 'info@dechoice.ng', phone: '08051234009', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'De Choice Foods Ltd', joinedDate: '2025-09-20', segments: ['Restaurant', 'Regular Repeater'], totalOrders: 22, totalSpent: 1120000, addedByAgentId: 'agent-kwed', addedByAgentName: 'M-Kwed', businessCategory: 'Restaurants & Bars' },
+  { id: 'cust-10', name: 'Madam Grace', email: 'grace.market@gmail.com', phone: '08051234010', type: CustomerType.B2C, location: 'Lagos', joinedDate: '2025-12-10', segments: ['Retail Household'], totalOrders: 4, totalSpent: 56000, addedByAgentId: 'agent-daniel', addedByAgentName: 'M-Daniel', familyType: 'Nuclear', maritalStatus: 'Widowed', ageGroup: '46-60', lifestyle: 'Budget-Conscious', employmentStatus: 'Self-Employed', jobType: 'Market Trader', religion: 'Christian' },
+  { id: 'cust-11', name: 'Lafia Coldroom', email: 'lafia.cold@yahoo.com', phone: '08051234011', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Lafia Coldroom Enterprise', joinedDate: '2025-07-15', segments: ['Wholesale Carton'], totalOrders: 15, totalSpent: 980000, addedByAgentId: 'agent-bantel', addedByAgentName: 'M-Bantel', businessCategory: 'Retailers' },
+  { id: 'cust-12', name: 'Mama Ijeoma', email: 'ijeoma@gmail.com', phone: '08051234012', type: CustomerType.B2C, location: 'Ife', joinedDate: '2026-02-01', segments: ['Retail Household'], totalOrders: 1, totalSpent: 14500, familyType: 'Extended', maritalStatus: 'Married', ageGroup: '36-45', lifestyle: 'Convenience-Seeker', employmentStatus: 'Self-Employed', jobType: 'Petty Trader', religion: 'Christian' },
+  { id: 'cust-13', name: 'FudFarmer Staff', email: 'internal@fudfarmer.com', phone: '08012345678', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2025-06-01', segments: ['Staff'], totalOrders: 10, totalSpent: 75000, addedByAgentId: 'admin', addedByAgentName: 'Admin', familyType: 'Nuclear', maritalStatus: 'Single', ageGroup: '26-35', lifestyle: 'Fitness-Oriented', employmentStatus: 'Privately Employed', jobType: 'Operations Staff', religion: 'Other' },
+  { id: 'cust-14', name: 'Zenith Suya Spot', email: 'zenith.suya@gmail.com', phone: '08051234014', type: CustomerType.B2B, location: 'Nasarawa', companyName: 'Zenith Suya Enterprise', joinedDate: '2025-10-15', segments: ['Restaurant', 'Regular Repeater'], totalOrders: 14, totalSpent: 680000, addedByAgentId: 'agent-favour', addedByAgentName: 'M-Favour', businessCategory: 'Roadside Business & Food Vendors' },
+  { id: 'cust-15', name: 'Hajiya Zainab', email: 'zainab.h@gmail.com', phone: '08051234015', type: CustomerType.B2C, location: 'Nasarawa', joinedDate: '2026-03-01', segments: ['Retail Household'], totalOrders: 2, totalSpent: 31000, familyType: 'Polygamy', maritalStatus: 'Married', ageGroup: '36-45', lifestyle: 'Budget-Conscious', employmentStatus: 'Self-Employed', jobType: 'Homemaker', religion: 'Muslim' },
 ];
 
 // ============ SALES (spanning Dec 2025 - Apr 2026) ============
@@ -74,6 +75,12 @@ const INITIAL_SALES: Sale[] = [
   { id: 'sale-26', customerId: 'cust-12', customerName: 'Mama Ijeoma', amount: 14500, profitMargin: 20, profitAmount: 2900, date: '2026-04-08', agentId: 'agent-testy', agentName: 'M-Testy', status: 'Paid', productDetails: '[Ife] 3 Kg Tilapia + 1 Kg Catfish', channel: SalesChannel.WALK_IN, deliveryStatus: DeliveryStatus.NOT_APPLICABLE },
   { id: 'sale-27', customerId: 'cust-11', customerName: 'Lafia Coldroom', amount: 196000, profitMargin: 15, profitAmount: 29400, date: '2026-04-10', agentId: 'agent-bantel', agentName: 'M-Bantel', status: 'Pending', productDetails: '[Nasarawa] 4 Cartons Chicken Laps + 2 Cartons Chicken Wings', isCredit: true, paymentTerms: PaymentTerms.NET_7 },
   { id: 'sale-28', customerId: 'cust-13', customerName: 'FudFarmer Staff', amount: 8500, profitMargin: 0, profitAmount: 0, date: '2026-04-11', agentId: 'admin', agentName: 'Admin', status: 'Paid', productDetails: '[Nasarawa] Staff purchase — 1L Honey + 2 Kg Chicken', channel: SalesChannel.WALK_IN, deliveryStatus: DeliveryStatus.NOT_APPLICABLE, notes: 'Staff discounted purchase' },
+  // Multi-line sale (one buyer, three products in a single transaction)
+  { id: 'sale-29', customerId: 'cust-05', customerName: 'Palace Hotel Nasarawa', amount: 235000, profitMargin: 23, profitAmount: 53000, date: '2026-04-16', agentId: 'admin', agentName: 'Admin', status: 'Paid', productDetails: '[Nasarawa] 20 Kg Whole Chicken (Frozen), 10 Kg Whole Turkey (Frozen), 2 Units Palm Oil (25L Jerrycan)', channel: SalesChannel.DELIVERY, deliveryStatus: DeliveryStatus.DELIVERED, deliveryAddress: 'Palace Hotel, Lafia', paymentType: 'Transfer', paymentMode: 'Full Payment', amountPaid: 235000, items: [
+    { itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', sku: 'FF-CHKN-01', quantity: 20, uom: 'Kg', unitPrice: 5000, unitCost: 3800, lineTotal: 100000, profit: 24000 },
+    { itemId: 'inv-t01', itemName: 'Whole Turkey (Frozen)', sku: 'FF-TRKY-01', quantity: 10, uom: 'Kg', unitPrice: 6500, unitCost: 5000, lineTotal: 65000, profit: 15000 },
+    { itemId: 'inv-p01', itemName: 'Palm Oil (25L Jerrycan)', sku: 'FF-PALM-01', quantity: 2, uom: 'Units', unitPrice: 35000, unitCost: 28000, lineTotal: 70000, profit: 14000 },
+  ] },
 ];
 
 // ============ FEEDBACK ============
@@ -137,18 +144,38 @@ const INITIAL_CREDITS: CreditRecord[] = [
 
 // ============ STOCK LOGS ============
 const INITIAL_STOCK_LOGS: StockLog[] = [
-  { id: 'sl-01', date: '2025-12-01', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.PURCHASE, quantity: 120, uom: 'Kg', unitCost: 3200, unitPrice: 4200, agentId: 'admin', supplier: 'Lagos Fish Market', batchNumber: 'BATCH-TIT-1201', expiryDate: '2026-06-01', notes: 'Initial stock purchase' },
-  { id: 'sl-02', date: '2025-12-01', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.PURCHASE, quantity: 100, uom: 'Kg', unitCost: 3800, unitPrice: 5000, agentId: 'admin', supplier: 'Amo Farms', batchNumber: 'BATCH-CHK-1201', expiryDate: '2026-06-01', notes: 'Initial stock' },
+  { id: 'sl-01', date: '2025-12-01', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.PURCHASE, quantity: 120, uom: 'Kg', unitCost: 3200, unitPrice: 4200, agentId: 'admin', supplier: 'Lagos Fish Market', supplierId: 'sup-01', batchNumber: 'BATCH-TIT-1201', expiryDate: '2026-06-01', notes: 'Initial stock purchase' },
+  { id: 'sl-02', date: '2025-12-01', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.PURCHASE, quantity: 100, uom: 'Kg', unitCost: 3800, unitPrice: 5000, agentId: 'admin', supplier: 'Amo Farms', supplierId: 'sup-02', batchNumber: 'BATCH-CHK-1201', expiryDate: '2026-06-01', notes: 'Initial stock' },
   { id: 'sl-03', date: '2025-12-05', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.SALE, quantity: -48, uom: 'Kg', unitCost: 3200, unitPrice: 4000, referenceId: 'sale-01', agentId: 'agent-kwed', notes: 'Sale to Alhaji Musa Stores' },
   { id: 'sl-04', date: '2025-12-08', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.SALE, quantity: -50, uom: 'Kg', unitCost: 3800, unitPrice: 5000, referenceId: 'sale-02', agentId: 'admin', notes: 'Sale to Palace Hotel' },
-  { id: 'sl-05', date: '2026-01-10', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.PURCHASE, quantity: 80, uom: 'Kg', unitCost: 3300, unitPrice: 4200, agentId: 'admin', supplier: 'Lagos Fish Market', batchNumber: 'BATCH-TIT-0110', expiryDate: '2026-07-10' },
+  { id: 'sl-05', date: '2026-01-10', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.PURCHASE, quantity: 80, uom: 'Kg', unitCost: 3300, unitPrice: 4200, agentId: 'admin', supplier: 'Lagos Fish Market', supplierId: 'sup-01', batchNumber: 'BATCH-TIT-0110', expiryDate: '2026-07-10' },
   { id: 'sl-06', date: '2026-01-15', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.TRANSFER, quantity: -30, uom: 'Kg', unitCost: 3250, unitPrice: 4200, agentId: 'admin', fromLocation: 'Nasarawa', toLocation: 'Ife', notes: 'Restock Ife hub' },
-  { id: 'sl-07', date: '2026-02-01', itemId: 'inv-b01', itemName: 'Beef (Boneless)', type: StockMovementType.PURCHASE, quantity: 50, uom: 'Kg', unitCost: 4500, unitPrice: 6000, agentId: 'admin', supplier: 'Nassarawa Abattoir', batchNumber: 'BATCH-BEF-0201', expiryDate: '2026-05-01' },
-  { id: 'sl-08', date: '2026-02-15', itemId: 'inv-g01', itemName: 'Rice (50kg bag)', type: StockMovementType.PURCHASE, quantity: 20, uom: 'Units', unitCost: 42000, unitPrice: 52000, agentId: 'admin', supplier: 'Olam Nigeria', batchNumber: 'BATCH-RIC-0215' },
-  { id: 'sl-09', date: '2026-03-01', itemId: 'inv-c02', itemName: 'Chicken Laps', type: StockMovementType.PURCHASE, quantity: 70, uom: 'Kg', unitCost: 3500, unitPrice: 4500, agentId: 'admin', supplier: 'Amo Farms', batchNumber: 'BATCH-CHL-0301', expiryDate: '2026-09-01' },
+  { id: 'sl-07', date: '2026-02-01', itemId: 'inv-b01', itemName: 'Beef (Boneless)', type: StockMovementType.PURCHASE, quantity: 50, uom: 'Kg', unitCost: 4500, unitPrice: 6000, agentId: 'admin', supplier: 'Nassarawa Abattoir', supplierId: 'sup-03', batchNumber: 'BATCH-BEF-0201', expiryDate: '2026-05-01' },
+  { id: 'sl-08', date: '2026-02-15', itemId: 'inv-g01', itemName: 'Rice (50kg bag)', type: StockMovementType.PURCHASE, quantity: 20, uom: 'Units', unitCost: 42000, unitPrice: 52000, agentId: 'admin', supplier: 'Olam Nigeria', supplierId: 'sup-04', batchNumber: 'BATCH-RIC-0215' },
+  { id: 'sl-09', date: '2026-03-01', itemId: 'inv-c02', itemName: 'Chicken Laps', type: StockMovementType.PURCHASE, quantity: 70, uom: 'Kg', unitCost: 3500, unitPrice: 4500, agentId: 'admin', supplier: 'Amo Farms', supplierId: 'sup-02', batchNumber: 'BATCH-CHL-0301', expiryDate: '2026-09-01' },
   { id: 'sl-10', date: '2026-03-10', itemId: 'inv-b01', itemName: 'Beef (Boneless)', type: StockMovementType.SALE, quantity: -16, uom: 'Kg', unitCost: 4500, unitPrice: 6000, referenceId: 'sale-18', agentId: 'agent-favour', notes: 'Sale to Zenith Suya Spot' },
-  { id: 'sl-11', date: '2026-03-15', itemId: 'inv-p01', itemName: 'Palm Oil (25L Jerrycan)', type: StockMovementType.PURCHASE, quantity: 15, uom: 'Units', unitCost: 28000, unitPrice: 35000, agentId: 'admin', supplier: 'Okomu Oil', batchNumber: 'BATCH-PLM-0315' },
+  { id: 'sl-11', date: '2026-03-15', itemId: 'inv-p01', itemName: 'Palm Oil (25L Jerrycan)', type: StockMovementType.PURCHASE, quantity: 15, uom: 'Units', unitCost: 28000, unitPrice: 35000, agentId: 'admin', supplier: 'Okomu Oil', supplierId: 'sup-05', batchNumber: 'BATCH-PLM-0315' },
   { id: 'sl-12', date: '2026-04-01', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.ADJUSTMENT, quantity: -5, uom: 'Kg', unitCost: 3800, unitPrice: 5000, agentId: 'admin', reason: 'Damaged stock — freezer malfunction on 30 Mar', notes: 'Write-off approved by Admin' },
+  // ── Retail SALE movements (feed per-supplier retail analytics; itemId links back to the supplier via purchases) ──
+  { id: 'sl-13', date: '2025-12-12', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.SALE, quantity: -20, uom: 'Kg', unitCost: 3200, unitPrice: 4200, referenceId: 'sale-03', agentId: 'agent-favour' },
+  { id: 'sl-14', date: '2026-01-04', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.SALE, quantity: -30, uom: 'Kg', unitCost: 3800, unitPrice: 5000, referenceId: 'sale-06', agentId: 'agent-testy' },
+  { id: 'sl-15', date: '2026-01-18', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.SALE, quantity: -60, uom: 'Kg', unitCost: 3250, unitPrice: 4200, referenceId: 'sale-09', agentId: 'agent-bantel' },
+  { id: 'sl-16', date: '2026-02-10', itemId: 'inv-f01', itemName: 'Titus (Mackerel)', type: StockMovementType.SALE, quantity: -72, uom: 'Kg', unitCost: 3250, unitPrice: 4000, referenceId: 'sale-12', agentId: 'agent-kwed' },
+  { id: 'sl-17', date: '2026-02-14', itemId: 'inv-c02', itemName: 'Chicken Laps', type: StockMovementType.SALE, quantity: -10, uom: 'Kg', unitCost: 3500, unitPrice: 4500, referenceId: 'sale-13', agentId: 'agent-kwed' },
+  { id: 'sl-18', date: '2026-02-18', itemId: 'inv-f04', itemName: 'Panla (Hake)', type: StockMovementType.SALE, quantity: -5, uom: 'Kg', unitCost: 2600, unitPrice: 3500, referenceId: 'sale-14', agentId: 'agent-daniel' },
+  { id: 'sl-19', date: '2026-02-15', itemId: 'inv-g01', itemName: 'Rice (50kg bag)', type: StockMovementType.SALE, quantity: -6, uom: 'Units', unitCost: 42000, unitPrice: 52000, referenceId: 'sale-15', agentId: 'admin' },
+  { id: 'sl-20', date: '2026-03-05', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.SALE, quantity: -40, uom: 'Kg', unitCost: 3800, unitPrice: 5000, referenceId: 'sale-17', agentId: 'agent-testy' },
+  { id: 'sl-21', date: '2026-03-10', itemId: 'inv-b01', itemName: 'Beef (Boneless)', type: StockMovementType.SALE, quantity: -12, uom: 'Kg', unitCost: 4500, unitPrice: 6000, referenceId: 'sale-05', agentId: 'agent-kwed' },
+  { id: 'sl-22', date: '2026-03-22', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.SALE, quantity: -15, uom: 'Kg', unitCost: 3800, unitPrice: 5000, referenceId: 'sale-21', agentId: 'agent-daniel' },
+  { id: 'sl-23', date: '2026-03-22', itemId: 'inv-t01', itemName: 'Whole Turkey (Frozen)', type: StockMovementType.SALE, quantity: -10, uom: 'Kg', unitCost: 5000, unitPrice: 6500, referenceId: 'sale-21', agentId: 'agent-daniel' },
+  { id: 'sl-24', date: '2026-03-15', itemId: 'inv-p01', itemName: 'Palm Oil (25L Jerrycan)', type: StockMovementType.SALE, quantity: -8, uom: 'Units', unitCost: 28000, unitPrice: 35000, referenceId: 'sale-23', agentId: 'admin' },
+  { id: 'sl-25', date: '2026-04-11', itemId: 'inv-h02', itemName: 'Pure Honey (1L)', type: StockMovementType.SALE, quantity: -3, uom: 'Units', unitCost: 6000, unitPrice: 8500, referenceId: 'sale-28', agentId: 'admin' },
+  { id: 'sl-26', date: '2026-04-05', itemId: 'inv-g01', itemName: 'Rice (50kg bag)', type: StockMovementType.SALE, quantity: -4, uom: 'Units', unitCost: 42000, unitPrice: 51000, referenceId: 'sale-25', agentId: 'agent-favour' },
+  { id: 'sl-27', date: '2026-04-02', itemId: 'inv-b01', itemName: 'Beef (Boneless)', type: StockMovementType.SALE, quantity: -6, uom: 'Kg', unitCost: 4500, unitPrice: 6000, referenceId: 'sale-24', agentId: 'agent-kwed' },
+  // Line items of the multi-line sale-29
+  { id: 'sl-28', date: '2026-04-16', itemId: 'inv-c01', itemName: 'Whole Chicken (Frozen)', type: StockMovementType.SALE, quantity: -20, uom: 'Kg', unitCost: 3800, unitPrice: 5000, referenceId: 'sale-29', agentId: 'admin' },
+  { id: 'sl-29', date: '2026-04-16', itemId: 'inv-t01', itemName: 'Whole Turkey (Frozen)', type: StockMovementType.SALE, quantity: -10, uom: 'Kg', unitCost: 5000, unitPrice: 6500, referenceId: 'sale-29', agentId: 'admin' },
+  { id: 'sl-30', date: '2026-04-16', itemId: 'inv-p01', itemName: 'Palm Oil (25L Jerrycan)', type: StockMovementType.SALE, quantity: -2, uom: 'Units', unitCost: 28000, unitPrice: 35000, referenceId: 'sale-29', agentId: 'admin' },
 ];
 
 // ============ TASKS ============
@@ -217,7 +244,27 @@ const INITIAL_INVENTORY: InventoryItem[] = [
   { id: 'inv-h02', sku: 'FF-HNEY-02', name: 'Pure Honey (1L)', category: 'Honey', unitOfMeasure: 'Units', minStockLevel: 8, currentStock: 20, avgUnitCost: 6000, baseSellingPrice: 8500, lastStockUpdate: '2026-03-07', location: 'Nasarawa' },
 ];
 
-const SEED_VERSION = '6';
+// ============ SUPPLIERS ============
+const INITIAL_SUPPLIERS: Supplier[] = [
+  { id: 'sup-01', name: 'Lagos Fish Market', businessName: 'Lagos Coastal Fisheries Co-op', businessType: SupplierBusinessType.MARKET, location: 'Lagos', address: 'Epe Fish Market, Lagos', contactPerson: 'Segun Adebayo', phone: '08061110001', email: 'sales@lagosfish.ng', categories: ['Fish'], paymentTerms: PaymentTerms.COD, leadTimeDays: 2, rating: 4, isActive: true, createdDate: '2025-11-15', addedByAgentId: 'admin', addedByAgentName: 'Admin', notes: 'Primary fish supplier. Cold-chain quality needs monitoring.' },
+  { id: 'sup-02', name: 'Amo Farms', businessName: 'Amo Byng Nigeria Ltd', businessType: SupplierBusinessType.FARM, location: 'Nasarawa', address: 'Awe Road, Lafia, Nasarawa', contactPerson: 'Mrs Ngozi Eze', phone: '08061110002', email: 'orders@amofarms.com', categories: ['Chicken', 'Turkey'], paymentTerms: PaymentTerms.NET_7, leadTimeDays: 3, rating: 5, isActive: true, createdDate: '2025-11-15', addedByAgentId: 'admin', addedByAgentName: 'Admin', notes: 'Reliable poultry supplier. Consistent quality.' },
+  { id: 'sup-03', name: 'Nassarawa Abattoir', businessName: 'Lafia Central Abattoir', businessType: SupplierBusinessType.ABATTOIR, location: 'Nasarawa', address: 'Lafia Main Abattoir, Nasarawa', contactPerson: 'Alh. Yakubu Sani', phone: '08061110003', email: '', categories: ['Beef & Exotic'], paymentTerms: PaymentTerms.COD, leadTimeDays: 1, rating: 3, isActive: true, createdDate: '2026-01-20', addedByAgentId: 'agent-kwed', addedByAgentName: 'M-Kwed', notes: 'Fresh beef & goat. Occasional late deliveries.' },
+  { id: 'sup-04', name: 'Olam Nigeria', businessName: 'Olam Nigeria Ltd', businessType: SupplierBusinessType.IMPORTER, location: 'Lagos', address: 'Iddo House, Lagos', contactPerson: 'Corporate Sales Desk', phone: '08061110004', email: 'trade@olamnigeria.com', categories: ['Grains & Staples'], paymentTerms: PaymentTerms.NET_14, leadTimeDays: 5, rating: 4, isActive: true, createdDate: '2026-02-01', addedByAgentId: 'admin', addedByAgentName: 'Admin', notes: 'Bulk rice & grains. Watch batch quality (weevils incident).' },
+  { id: 'sup-05', name: 'Okomu Oil', businessName: 'Okomu Oil Palm Plc', businessType: SupplierBusinessType.MILL, location: 'Lagos', address: 'Okomu Estate, Edo (Lagos depot)', contactPerson: 'Depot Manager', phone: '08061110005', email: 'depot@okomuoil.com', categories: ['Palm Oil'], paymentTerms: PaymentTerms.NET_7, leadTimeDays: 4, rating: 4, isActive: true, createdDate: '2026-03-01', addedByAgentId: 'admin', addedByAgentName: 'Admin', notes: 'Palm oil. Prices adjust with market.' },
+  { id: 'sup-06', name: 'Benue Honey Collective', businessName: 'Benue Apiary Collective', businessType: SupplierBusinessType.FARM, location: 'Nasarawa', address: 'Makurdi Road, Benue', contactPerson: 'Terkimbi Ada', phone: '08061110006', email: 'benuehoney@gmail.com', categories: ['Honey'], paymentTerms: PaymentTerms.COD, leadTimeDays: 6, rating: 5, isActive: true, createdDate: '2026-03-10', addedByAgentId: 'agent-favour', addedByAgentName: 'M-Favour', notes: 'Pure raw honey. Seasonal supply.' },
+  { id: 'sup-07', name: 'Vitafoam Sausage Co', businessName: 'Prime Deli Foods Ltd', businessType: SupplierBusinessType.DISTRIBUTOR, location: 'Lagos', address: 'Ikeja Industrial, Lagos', contactPerson: 'Kunle Bakare', phone: '08061110007', email: 'sales@primedeli.ng', categories: ['Sausage'], paymentTerms: PaymentTerms.NET_7, leadTimeDays: 3, rating: 3, isActive: false, createdDate: '2026-03-12', addedByAgentId: 'admin', addedByAgentName: 'Admin', notes: 'Deactivated — switched to a cheaper source.' },
+];
+
+// ============ SUPPLIER ISSUES ============
+const INITIAL_SUPPLIER_ISSUES: SupplierIssue[] = [
+  { id: 'si-01', supplierId: 'sup-04', supplierName: 'Olam Nigeria', type: SupplierIssueType.QUALITY, severity: 'High', description: 'Rice bag (BATCH-RIC-0215) delivered with weevils — affected OAU Staff Canteen order. Institutional customer complaint.', date: '2026-02-20', status: 'Resolved', resolutionNote: 'Escalated to Olam. Full bag replaced and supplier agreed to pre-delivery fumigation checks going forward.', resolvedDate: '2026-02-23', reportedByAgentId: 'agent-testy', reportedByAgentName: 'M-Testy', relatedItemId: 'inv-g01', relatedStockLogId: 'sl-08' },
+  { id: 'si-02', supplierId: 'sup-01', supplierName: 'Lagos Fish Market', type: SupplierIssueType.QUALITY, severity: 'Medium', description: 'Titus batch (BATCH-TIT-1201) had inconsistent freezing — suspected cold-chain break in transit. Traced from a Mama Nkechi complaint.', date: '2025-12-18', status: 'Resolved', resolutionNote: 'Supplier now ships with temperature-logged cold boxes. Extra QC on arrival.', resolvedDate: '2025-12-22', reportedByAgentId: 'agent-favour', reportedByAgentName: 'M-Favour', relatedItemId: 'inv-f01', relatedStockLogId: 'sl-01' },
+  { id: 'si-03', supplierId: 'sup-03', supplierName: 'Nassarawa Abattoir', type: SupplierIssueType.LATE_DELIVERY, severity: 'Medium', description: 'Beef delivery arrived a day late on the last order, delaying De Choice Restaurant dispatch.', date: '2026-04-02', status: 'Open', reportedByAgentId: 'agent-kwed', reportedByAgentName: 'M-Kwed', relatedItemId: 'inv-b01' },
+  { id: 'si-04', supplierId: 'sup-02', supplierName: 'Amo Farms', type: SupplierIssueType.SHORT_DELIVERY, severity: 'Low', description: 'Chicken laps order came ~3kg short of the invoiced weight. First occurrence with this supplier.', date: '2026-03-01', status: 'Open', reportedByAgentId: 'admin', reportedByAgentName: 'Admin', relatedItemId: 'inv-c02', relatedStockLogId: 'sl-09' },
+  { id: 'si-05', supplierId: 'sup-05', supplierName: 'Okomu Oil', type: SupplierIssueType.PRICING, severity: 'Low', description: 'Palm oil unit price raised ~8% without prior notice on the March purchase.', date: '2026-03-15', status: 'Resolved', resolutionNote: 'Confirmed market-driven increase. Negotiated 30-day price notice for future orders.', resolvedDate: '2026-03-18', reportedByAgentId: 'admin', reportedByAgentName: 'Admin', relatedItemId: 'inv-p01', relatedStockLogId: 'sl-11' },
+];
+
+const SEED_VERSION = '10';
 const SEED_VERSION_KEY = 'fudfarmer_seed_version';
 
 const KEYS = {
@@ -233,6 +280,8 @@ const KEYS = {
   STOCK_LOGS: 'fudfarmer_stock_logs',
   CREDITS: 'fudfarmer_credits',
   AUDIT_LOGS: 'fudfarmer_audit_logs',
+  SUPPLIERS: 'fudfarmer_suppliers',
+  SUPPLIER_ISSUES: 'fudfarmer_supplier_issues',
 };
 
 // Wipe stale seed data when version changes
@@ -290,6 +339,12 @@ export const StorageService = {
 
   getCredits: () => getItems<CreditRecord>(KEYS.CREDITS, INITIAL_CREDITS),
   saveCredits: (items: CreditRecord[]) => setItems(KEYS.CREDITS, items),
+
+  getSuppliers: () => getItems<Supplier>(KEYS.SUPPLIERS, INITIAL_SUPPLIERS),
+  saveSuppliers: (items: Supplier[]) => setItems(KEYS.SUPPLIERS, items),
+
+  getSupplierIssues: () => getItems<SupplierIssue>(KEYS.SUPPLIER_ISSUES, INITIAL_SUPPLIER_ISSUES),
+  saveSupplierIssues: (items: SupplierIssue[]) => setItems(KEYS.SUPPLIER_ISSUES, items),
 
   getAuditLogs: () => getItems<AuditLog>(KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS),
   addAuditLog: (log: Omit<AuditLog, 'id' | 'timestamp'>) => {

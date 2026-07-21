@@ -53,7 +53,11 @@ export default function DashboardPage() {
   const router = useRouter();
   const [period, setPeriod] = useState<Period>('month');
   const [catPeriod, setCatPeriod] = useState<Period>('month');
+  const [trackerPeriod, setTrackerPeriod] = useState<Period>('today');
   const [custFilter, setCustFilter] = useState<'all' | 'B2B' | 'B2C'>('all');
+  const [custSort, setCustSort] = useState<'spent' | 'orders' | 'avg'>('spent');
+  const [creditFilter, setCreditFilter] = useState<'all' | 'Overdue' | 'Pending' | 'Clear'>('all');
+  const [invSort, setInvSort] = useState<'value' | 'count'>('value');
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
 
   const { can, user } = usePermissions();
@@ -111,14 +115,19 @@ export default function DashboardPage() {
   // ═══ TOP CUSTOMERS ═══
   const customerData = useMemo(() => {
     const filtered = custFilter === 'all' ? customers : customers.filter((c) => c.type === custFilter);
-    const top = [...filtered].filter((c) => c.totalSpent > 0).sort((a, b) => b.totalSpent - a.totalSpent).slice(0, 10);
+    const sortFn = custSort === 'orders'
+      ? (a: typeof customers[number], b: typeof customers[number]) => b.totalOrders - a.totalOrders
+      : custSort === 'avg'
+        ? (a: typeof customers[number], b: typeof customers[number]) => (b.totalOrders ? b.totalSpent / b.totalOrders : 0) - (a.totalOrders ? a.totalSpent / a.totalOrders : 0)
+        : (a: typeof customers[number], b: typeof customers[number]) => b.totalSpent - a.totalSpent;
+    const top = [...filtered].filter((c) => c.totalSpent > 0).sort(sortFn).slice(0, 10);
     const total = customers.length;
     const b2b = customers.filter((c) => c.type === CustomerType.B2B).length;
     const b2c = customers.filter((c) => c.type === CustomerType.B2C).length;
     const repeat = customers.filter((c) => c.totalOrders >= 2).length;
     const repeatPct = pct(repeat, total);
     return { top, total, b2b, b2c, repeat, repeatPct };
-  }, [customers, custFilter]);
+  }, [customers, custFilter, custSort]);
 
   // ═══ INVENTORY ═══
   const invData = useMemo(() => {
@@ -135,10 +144,10 @@ export default function DashboardPage() {
     });
     const catChart = Object.entries(catMap)
       .map(([name, data]) => ({ name, value: data.value, count: data.count, fill: CAT_COLORS[name] || CAT_COLORS.Other }))
-      .sort((a, b) => b.value - a.value);
+      .sort((a, b) => invSort === 'count' ? b.count - a.count : b.value - a.value);
 
     return { skus: inventory.length, totalValue, low, out, catChart };
-  }, [inventory]);
+  }, [inventory, invSort]);
 
   // ═══ CREDIT BOOK ═══
   const creditData = useMemo(() => {
@@ -150,6 +159,9 @@ export default function DashboardPage() {
     const pendingTotal = pending.reduce((a, c) => a + c.amountOwed, 0);
     const cleared = credits.filter((c) => c.status === 'Clear');
     const clearedTotal = cleared.reduce((a, c) => a + c.amountOwed, 0);
+    // Filtered record list + its total (driven by the card's status filter)
+    const filteredRecords = credits.filter((c) => creditFilter === 'all' ? c.status !== 'Clear' : c.status === creditFilter);
+    const filteredTotal = filteredRecords.reduce((a, c) => a + c.amountOwed, 0);
 
     // Pie chart for status breakdown
     const statusChart = [
@@ -162,18 +174,23 @@ export default function DashboardPage() {
       outstanding: outstanding.length, totalOwed,
       overdue: overdue.length, overdueTotal,
       pending: pending.length, pendingTotal,
-      records: outstanding.slice(0, 5),
+      records: filteredRecords.slice(0, 6),
+      filteredCount: filteredRecords.length, filteredTotal,
       statusChart,
     };
-  }, [credits]);
+  }, [credits, creditFilter]);
 
   // ═══ TRACKER DATA ═══
+  const trackerLabel = trackerPeriod === 'today' ? "Today's" : trackerPeriod === 'week' ? "This Week's" : trackerPeriod === 'month' ? "This Month's" : 'Total';
   const tracker = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todaySales = sales.filter((s) => new Date(s.date) >= today);
-    const todayRevenue = todaySales.reduce((a, s) => a + s.amount, 0);
-    const todayOrders = todaySales.length;
+    // Period-scoped revenue / orders / new customers
+    const tCut = getCutoff(trackerPeriod);
+    const scopedSales = tCut ? sales.filter((s) => new Date(s.date) >= tCut) : sales;
+    const todayRevenue = scopedSales.reduce((a, s) => a + s.amount, 0);
+    const todayOrders = scopedSales.length;
+    const periodNewCustomers = tCut ? customers.filter((c) => new Date(c.joinedDate) >= tCut).length : customers.length;
 
     const lowStock = inventory.filter((i) => i.currentStock <= i.minStockLevel && i.currentStock > 0).length;
     const outOfStock = inventory.filter((i) => i.currentStock <= 0).length;
@@ -196,9 +213,9 @@ export default function DashboardPage() {
       todayRevenue, todayOrders, stockAlerts, lowStock, outOfStock,
       overdueCredits: overdueCredits.length, overdueAmount,
       openTickets, openFeedback, openEnquiries,
-      totalCustomers, newCustomersThisMonth, totalOutstanding,
+      totalCustomers, newCustomersThisMonth, periodNewCustomers, totalOutstanding,
     };
-  }, [sales, inventory, credits, feedbacks, enquiries, customers]);
+  }, [sales, inventory, credits, feedbacks, enquiries, customers, trackerPeriod]);
 
   // ═══ PURCHASE HISTORY FOR SELECTED CUSTOMER ═══
   const purchaseHistory = useMemo(() => {
@@ -239,6 +256,10 @@ export default function DashboardPage() {
       {/* ═══════════════════════════════════════
            TRACKER STRIP
          ═══════════════════════════════════════ */}
+      <div className="flex items-center justify-between -mb-1">
+        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">Overview</span>
+        <PeriodTabs value={trackerPeriod} onChange={setTrackerPeriod} />
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Today's Revenue */}
         <button onClick={() => router.push('/sales')} className="group relative rounded-xl border bg-card p-4 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all text-left">
@@ -249,7 +270,7 @@ export default function DashboardPage() {
             <ArrowUpRight size={14} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
           </div>
           <p className="text-xl font-black text-emerald-600">{tracker.todayRevenue > 0 ? fmtK(tracker.todayRevenue) : `${NAIRA}0`}</p>
-          <p className="text-[10px] font-bold text-muted-foreground uppercase mt-0.5">Today&apos;s Revenue</p>
+          <p className="text-[10px] font-bold text-muted-foreground uppercase mt-0.5">{trackerLabel} Revenue</p>
           {tracker.todayOrders > 0 && <p className="text-[10px] text-muted-foreground">{tracker.todayOrders} order{tracker.todayOrders !== 1 ? 's' : ''}</p>}
         </button>
 
@@ -313,7 +334,7 @@ export default function DashboardPage() {
           </div>
           <p className="text-xl font-black">{tracker.totalCustomers}</p>
           <p className="text-[10px] font-bold text-muted-foreground uppercase mt-0.5">Customers</p>
-          {tracker.newCustomersThisMonth > 0 && <p className="text-[10px] text-emerald-600 font-semibold">+{tracker.newCustomersThisMonth} this month</p>}
+          {trackerPeriod !== 'all' && tracker.periodNewCustomers > 0 && <p className="text-[10px] text-emerald-600 font-semibold">+{tracker.periodNewCustomers} {trackerPeriod === 'today' ? 'today' : trackerPeriod === 'week' ? 'this week' : 'this month'}</p>}
         </button>
       </div>
 
@@ -490,6 +511,11 @@ export default function DashboardPage() {
             <h2 className="text-sm font-bold">Top Customers</h2>
           </div>
           <div className="flex items-center gap-3">
+            <select value={custSort} onChange={(e) => setCustSort(e.target.value as 'spent' | 'orders' | 'avg')} className="h-7 rounded-lg border bg-muted/40 px-2 text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-ring">
+              <option value="spent">Sort: Total Spent</option>
+              <option value="orders">Sort: Orders</option>
+              <option value="avg">Sort: Avg Order</option>
+            </select>
             <div className="flex items-center gap-0.5 bg-muted/40 p-0.5 rounded-lg border">
               {([['all', 'All'], ['B2B', 'B2B'], ['B2C', 'B2C']] as ['all' | 'B2B' | 'B2C', string][]).map(([key, label]) => (
                 <button key={key} onClick={() => setCustFilter(key)}
@@ -516,7 +542,7 @@ export default function DashboardPage() {
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${c.type === 'B2B' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
                       {c.type}
                     </span>
-                    <span className="text-sm font-black text-emerald-600 w-20 text-right">{fmtK(c.totalSpent)}</span>
+                    <span className="text-sm font-black text-emerald-600 w-20 text-right">{custSort === 'orders' ? `${c.totalOrders} ord` : custSort === 'avg' ? fmtK(c.totalOrders ? Math.round(c.totalSpent / c.totalOrders) : 0) : fmtK(c.totalSpent)}</span>
                     <button
                       onClick={() => setSelectedCustomer(selectedCustomer?.id === c.id ? null : c)}
                       className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold text-primary hover:bg-primary hover:text-primary-foreground border transition-all"
@@ -578,14 +604,21 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* INVENTORY */}
         <div className="rounded-xl border bg-card shadow-sm">
-          <div className="flex items-center justify-between p-5 border-b">
+          <div className="flex items-center justify-between p-5 border-b gap-3">
             <div className="flex items-center gap-2">
               <Package size={16} className="text-primary" />
               <h2 className="text-sm font-bold">Inventory</h2>
             </div>
-            <button onClick={() => router.push('/inventory')} className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
-              Manage <ChevronRight size={12} />
-            </button>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-0.5 bg-muted/40 p-0.5 rounded-lg border">
+                {([['value', 'By Value'], ['count', 'By SKUs']] as ['value' | 'count', string][]).map(([key, label]) => (
+                  <button key={key} onClick={() => setInvSort(key)} className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${invSort === key ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>{label}</button>
+                ))}
+              </div>
+              <button onClick={() => router.push('/inventory')} className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+                Manage <ChevronRight size={12} />
+              </button>
+            </div>
           </div>
           <div className="p-5">
             <div className="grid grid-cols-2 gap-4 mb-4">
@@ -602,14 +635,14 @@ export default function DashboardPage() {
             {/* Stock value by category chart */}
             {invData.catChart.length > 0 && (
               <div className="h-[180px] mb-4">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase mb-2">Value by Category</p>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase mb-2">{invSort === 'count' ? 'SKUs' : 'Value'} by Category</p>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={invData.catChart} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }} interval={0} angle={-35} textAnchor="end" height={50} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }} tickFormatter={(v) => fmtK(v)} />
-                    <Tooltip {...TT} formatter={(value) => fmt(Number(value))} />
-                    <Bar dataKey="value" name="Stock Value" radius={[3, 3, 0, 0]} barSize={20}>
+                    <YAxis axisLine={false} tickLine={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }} tickFormatter={(v) => invSort === 'count' ? String(v) : fmtK(v)} />
+                    <Tooltip {...TT} formatter={(value) => invSort === 'count' ? `${value} SKUs` : fmt(Number(value))} />
+                    <Bar dataKey={invSort === 'count' ? 'count' : 'value'} name={invSort === 'count' ? 'SKUs' : 'Stock Value'} radius={[3, 3, 0, 0]} barSize={20}>
                       {invData.catChart.map((entry, idx) => (
                         <Cell key={idx} fill={entry.fill} />
                       ))}
@@ -653,14 +686,22 @@ export default function DashboardPage() {
 
         {/* CREDIT BOOK */}
         <div className="rounded-xl border bg-card shadow-sm">
-          <div className="flex items-center justify-between p-5 border-b">
+          <div className="flex items-center justify-between p-5 border-b gap-3">
             <div className="flex items-center gap-2">
               <CreditCard size={16} className={creditData.overdue > 0 ? 'text-red-600' : 'text-emerald-600'} />
               <h2 className="text-sm font-bold">Credit Book</h2>
             </div>
-            <button onClick={() => router.push('/credits')} className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
-              Manage <ChevronRight size={12} />
-            </button>
+            <div className="flex items-center gap-3">
+              <select value={creditFilter} onChange={(e) => setCreditFilter(e.target.value as 'all' | 'Overdue' | 'Pending' | 'Clear')} className="h-7 rounded-lg border bg-muted/40 px-2 text-[11px] font-semibold focus:outline-none focus:ring-2 focus:ring-ring">
+                <option value="all">All Open</option>
+                <option value="Overdue">Overdue</option>
+                <option value="Pending">Pending</option>
+                <option value="Clear">Cleared</option>
+              </select>
+              <button onClick={() => router.push('/credits')} className="text-xs font-semibold text-primary hover:underline flex items-center gap-1">
+                Manage <ChevronRight size={12} />
+              </button>
+            </div>
           </div>
           <div className="p-5">
             <div className="grid grid-cols-3 gap-3 mb-4">
@@ -706,16 +747,19 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Recent credits */}
+            {/* Filtered credit list */}
             {creditData.records.length > 0 ? (
               <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase mb-2">Recent</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase">{creditFilter === 'all' ? 'Recent' : creditFilter} ({creditData.filteredCount})</p>
+                  <p className="text-[10px] font-bold text-muted-foreground">{fmtK(creditData.filteredTotal)}</p>
+                </div>
                 <div className="space-y-2">
                   {creditData.records.map((cr) => (
                     <div key={cr.id} className="flex items-center gap-3 py-2 border-b last:border-0">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${cr.status === 'Overdue' ? 'bg-red-500' : 'bg-amber-500'}`} />
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${cr.status === 'Overdue' ? 'bg-red-500' : cr.status === 'Clear' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                       <span className="text-xs font-semibold flex-1 truncate">{cr.customerName}</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cr.status === 'Overdue' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${cr.status === 'Overdue' ? 'bg-red-100 text-red-700' : cr.status === 'Clear' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                         {cr.status}
                       </span>
                       <span className="text-xs font-black">{fmtK(cr.amountOwed)}</span>
@@ -724,7 +768,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-emerald-600 font-medium">No outstanding credits</p>
+              <p className="text-xs text-emerald-600 font-medium">No {creditFilter === 'all' ? 'outstanding' : creditFilter.toLowerCase()} credits</p>
             )}
           </div>
         </div>

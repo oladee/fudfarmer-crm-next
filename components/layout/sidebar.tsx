@@ -4,20 +4,22 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
-import { useInventory, useFeedback, useEnquiries, useCredits } from '@/hooks/use-queries';
+import { useInventory, useFeedback, useEnquiries, useCredits, useSupplierIssues } from '@/hooks/use-queries';
 import { Permission } from '@/lib/permissions';
 import {
   LayoutDashboard, Package, Users, Target, Banknote,
-  CreditCard, History, MessageSquare,
-  Settings, LogOut, Menu, X, Leaf, BarChart3,
+  CreditCard, History, MessageSquare, Truck,
+  Settings, LogOut, Menu, X, Leaf, BarChart3, Sparkles,
 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 
 const navItems: { href: string; label: string; icon: typeof LayoutDashboard; permission?: Permission }[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard.view' },
   { href: '/analytics', label: 'Analytics', icon: BarChart3, permission: 'analytics.view' },
+  { href: '/insights', label: 'Insights', icon: Sparkles, permission: 'analytics.view' },
   { href: '/inventory', label: 'Inventory', icon: Package, permission: 'inventory.view' },
   { href: '/customers', label: 'Customers', icon: Users, permission: 'customers.view' },
+  { href: '/suppliers', label: 'Suppliers', icon: Truck, permission: 'suppliers.view' },
   { href: '/sales', label: 'Sales', icon: Banknote, permission: 'sales.view' },
   { href: '/credits', label: 'Credits', icon: CreditCard, permission: 'credits.view' },
   { href: '/interactions', label: 'Interactions', icon: MessageSquare, permission: 'interactions.view' },
@@ -32,6 +34,7 @@ export function Sidebar() {
   const { data: feedback } = useFeedback();
   const { data: enquiries } = useEnquiries();
   const { data: credits } = useCredits();
+  const { data: supplierIssues } = useSupplierIssues();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const lowStockCount = useMemo(() => {
@@ -53,6 +56,11 @@ export function Sidebar() {
     if (!credits) return 0;
     return credits.filter((c) => c.status === 'Overdue').length;
   }, [credits]);
+
+  const openIssuesCount = useMemo(() => {
+    if (!supplierIssues) return 0;
+    return supplierIssues.filter((i) => i.status === 'Open').length;
+  }, [supplierIssues]);
 
   const content = (
     <div className="flex h-full flex-col bg-sidebar border-r border-sidebar-border">
@@ -97,6 +105,11 @@ export function Sidebar() {
               {item.label === 'Credits' && overdueCreditsCount > 0 && (
                 <span className="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-white">
                   {overdueCreditsCount}
+                </span>
+              )}
+              {item.label === 'Suppliers' && openIssuesCount > 0 && (
+                <span className="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-white">
+                  {openIssuesCount}
                 </span>
               )}
             </Link>

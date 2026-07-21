@@ -100,13 +100,34 @@ export enum StockMovementType {
   RETURN = 'RETURN',
 }
 
+export enum SupplierBusinessType {
+  FARM = 'Farm',
+  DISTRIBUTOR = 'Distributor',
+  WHOLESALER = 'Wholesaler',
+  IMPORTER = 'Importer',
+  ABATTOIR = 'Abattoir',
+  MILL = 'Mill',
+  MARKET = 'Market',
+  OTHER = 'Other',
+}
+
+export enum SupplierIssueType {
+  QUALITY = 'Quality',
+  LATE_DELIVERY = 'Late Delivery',
+  SHORT_DELIVERY = 'Short Delivery',
+  WRONG_ITEM = 'Wrong Item',
+  PRICING = 'Pricing',
+  PACKAGING = 'Packaging',
+  OTHER = 'Other',
+}
+
 export interface AuditLog {
   id: string;
   timestamp: string;
   userId: string;
   userName: string;
   action: string;
-  entityType: 'Inventory' | 'Sale' | 'Customer' | 'System';
+  entityType: 'Inventory' | 'Sale' | 'Customer' | 'Supplier' | 'System';
   entityId?: string;
   details: string;
   location: string;
@@ -123,6 +144,31 @@ export const PREDEFINED_SEGMENTS = [
   'VIP',
   'Staff',
 ];
+
+// ── B2B business-category segmentation ──
+export const B2B_CATEGORIES = [
+  'Roadside Business & Food Vendors',
+  'Hospitality',
+  'Schools',
+  'Religious Bodies',
+  'NGOs & Associations',
+  'Retailers',
+  'Education Institutions',
+  'Event Planners',
+  'Restaurants & Bars',
+  'Hotels',
+  'Catering Services',
+  'Supermarkets',
+  'Corporate / Offices',
+] as const;
+
+// ── B2C consumer segmentation ──
+export const FAMILY_TYPES = ['Monogamy', 'Polygamy', 'Nuclear', 'Extended'] as const;
+export const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed'] as const;
+export const AGE_GROUPS = ['18-25', '26-35', '36-45', '46-60', '60+'] as const;
+export const LIFESTYLE_TAGS = ['Health-Conscious', 'Fitness-Oriented', 'Diet-Restricted', 'Organic Preference', 'Convenience-Seeker', 'Budget-Conscious'] as const;
+export const EMPLOYMENT_STATUSES = ['Self-Employed', 'Privately Employed', 'Civil Servant', 'Business Owner', 'Student', 'Unemployed', 'Retired'] as const;
+export const RELIGIONS = ['Christian', 'Muslim', 'Traditional', 'Other'] as const;
 
 export type ProductCategory =
   | 'Fish'
@@ -153,6 +199,7 @@ export interface InventoryItem {
   lastPurchasePrice?: number;
   isActive?: boolean;
   priceHistory?: { date: string; cost: number; price: number }[];
+  supplierId?: string;
 }
 
 export interface StockLog {
@@ -174,6 +221,7 @@ export interface StockLog {
   fromLocation?: string;
   toLocation?: string;
   reason?: string;
+  supplierId?: string;
 }
 
 export type CreditGrade = 'A' | 'B' | 'C' | 'D' | 'F' | 'N/A';
@@ -248,13 +296,36 @@ export interface Customer {
   totalSpent: number;
   addedByAgentId?: string;
   addedByAgentName?: string;
+  // B2B segmentation
+  businessCategory?: string;
+  // B2C segmentation
+  familyType?: string;
+  maritalStatus?: string;
+  ageGroup?: string;
+  lifestyle?: string;
+  employmentStatus?: string;
+  jobType?: string;
+  religion?: string;
 }
 
+
+export interface SaleItem {
+  itemId: string;
+  itemName: string;
+  sku?: string;
+  quantity: number;
+  uom: string;
+  unitPrice: number;
+  unitCost: number;
+  lineTotal: number;
+  profit: number;
+}
 
 export interface Sale {
   id: string;
   customerId: string;
   customerName: string;
+  items?: SaleItem[];
   amount: number;
   profitMargin: number;
   profitAmount: number;
@@ -319,6 +390,44 @@ export interface Enquiry {
   resolution?: string;
   managedByAgentId?: string;
   managedByAgentName?: string;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  businessName?: string;
+  businessType?: SupplierBusinessType;
+  location?: string;
+  address?: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  categories?: ProductCategory[];
+  paymentTerms?: PaymentTerms;
+  leadTimeDays?: number;
+  rating?: number; // 1–5 reliability
+  isActive: boolean;
+  notes?: string;
+  createdDate: string;
+  addedByAgentId?: string;
+  addedByAgentName?: string;
+}
+
+export interface SupplierIssue {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  type: SupplierIssueType;
+  severity: 'Low' | 'Medium' | 'High';
+  description: string;
+  date: string;
+  status: 'Open' | 'Resolved';
+  resolutionNote?: string;
+  resolvedDate?: string;
+  reportedByAgentId?: string;
+  reportedByAgentName?: string;
+  relatedItemId?: string;
+  relatedStockLogId?: string;
 }
 
 export interface AuthContextType {

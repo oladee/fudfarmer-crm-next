@@ -1,16 +1,19 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useCustomers, useSaveCustomers, useAgents, useCredits,
-  useSales, useFeedback, useEnquiries, useCompensations, useHubs,
+  useSales, useFeedback, useEnquiries, useCompensations, useHubs, useStockLogs,
 } from '@/hooks/use-queries';
 import { StorageService } from '@/lib/storage-service';
 import {
-  Customer, CustomerType, PREDEFINED_SEGMENTS,
-  CreditGrade, Sale, Feedback, Enquiry, Compensation, CreditRecord,
+  Customer, CustomerType,
+  CreditGrade, Sale, Feedback, Enquiry, Compensation, CreditRecord, StockMovementType,
+  B2B_CATEGORIES, FAMILY_TYPES, MARITAL_STATUSES, AGE_GROUPS,
+  LIFESTYLE_TAGS, EMPLOYMENT_STATUSES, RELIGIONS,
 } from '@/types';
+import { deriveSegments, SEGMENT_GROUP_OF } from '@/lib/segmentation';
 import { toast } from 'sonner';
 import { usePermissions } from '@/hooks/use-permissions';
 import {
@@ -22,10 +25,64 @@ import {
   Edit3, Save, ShoppingCart, CreditCard, MessageSquare,
   TrendingUp, Package, Truck, ChevronRight, AlertTriangle,
   FileText, RefreshCw, ArrowUpRight, Clock,
-  Users, BarChart3, Heart,
+  Users, BarChart3, Heart, Briefcase, Home, Church, Cake, HeartPulse, Tag, Sparkles,
+  TrendingDown, Repeat, ChevronDown, Activity, Wallet, Flame, Timer, Boxes, Gauge,
 } from 'lucide-react';
 
 type DetailTab = 'overview' | 'purchases' | 'credit' | 'interactions';
+
+/* ────────── Auto-segment chip colours (by taxonomy group) ────────── */
+const SEG_GROUP_COLORS: Record<string, string> = {
+  Channel: 'bg-slate-100 text-slate-700 border-slate-200',
+  Loyalty: 'bg-purple-50 text-purple-700 border-purple-200',
+  Value: 'bg-amber-50 text-amber-700 border-amber-200',
+  'Business Type': 'bg-blue-50 text-blue-700 border-blue-200',
+  Household: 'bg-teal-50 text-teal-700 border-teal-200',
+  'Life Stage': 'bg-pink-50 text-pink-700 border-pink-200',
+  Lifestyle: 'bg-green-50 text-green-700 border-green-200',
+  Occupation: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  Dietary: 'bg-orange-50 text-orange-700 border-orange-200',
+};
+const segClass = (s: string) => SEG_GROUP_COLORS[SEGMENT_GROUP_OF[s]] || 'bg-muted text-muted-foreground border-border';
+
+/* ────────── Type-specific profile fields (shared by add + edit) ────────── */
+const pfCls = 'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring';
+const pfClsSm = 'flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring';
+
+function CustomerProfileFields({ type, data, onChange, dense = false }: {
+  type: CustomerType;
+  data: Partial<Customer>;
+  onChange: (patch: Partial<Customer>) => void;
+  dense?: boolean;
+}) {
+  const cls = dense ? pfClsSm : pfCls;
+  const labelCls = dense ? 'text-xs font-medium text-muted-foreground' : 'text-sm font-medium';
+  const opt = (v: string) => <option key={v} value={v}>{v}</option>;
+
+  if (type === CustomerType.B2B) {
+    return (
+      <div className="space-y-1.5">
+        <label className={labelCls}>Business Category</label>
+        <select value={data.businessCategory || ''} onChange={(e) => onChange({ businessCategory: e.target.value })} className={cls}>
+          <option value="">— Select category —</option>
+          {B2B_CATEGORIES.map(opt)}
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="space-y-1.5"><label className={labelCls}>Family Type</label><select value={data.familyType || ''} onChange={(e) => onChange({ familyType: e.target.value })} className={cls}><option value="">— Select —</option>{FAMILY_TYPES.map(opt)}</select></div>
+      <div className="space-y-1.5"><label className={labelCls}>Marital Status</label><select value={data.maritalStatus || ''} onChange={(e) => onChange({ maritalStatus: e.target.value })} className={cls}><option value="">— Select —</option>{MARITAL_STATUSES.map(opt)}</select></div>
+      <div className="space-y-1.5"><label className={labelCls}>Age Group</label><select value={data.ageGroup || ''} onChange={(e) => onChange({ ageGroup: e.target.value })} className={cls}><option value="">— Select —</option>{AGE_GROUPS.map(opt)}</select></div>
+      <div className="space-y-1.5"><label className={labelCls}>Lifestyle &amp; Health</label><select value={data.lifestyle || ''} onChange={(e) => onChange({ lifestyle: e.target.value })} className={cls}><option value="">— Select —</option>{LIFESTYLE_TAGS.map(opt)}</select></div>
+      <div className="space-y-1.5"><label className={labelCls}>Employment Status</label><select value={data.employmentStatus || ''} onChange={(e) => onChange({ employmentStatus: e.target.value })} className={cls}><option value="">— Select —</option>{EMPLOYMENT_STATUSES.map(opt)}</select></div>
+      <div className="space-y-1.5"><label className={labelCls}>Job Type / Occupation</label><input type="text" value={data.jobType || ''} onChange={(e) => onChange({ jobType: e.target.value })} placeholder="e.g. Trader, Teacher" className={cls} /></div>
+      <div className="space-y-1.5 sm:col-span-2"><label className={labelCls}>Religion</label><select value={data.religion || ''} onChange={(e) => onChange({ religion: e.target.value })} className={cls}><option value="">— Select —</option>{RELIGIONS.map(opt)}</select></div>
+    </div>
+  );
+}
 
 export default function CustomersPage() {
   const { user } = useAuth();
@@ -34,6 +91,7 @@ export default function CustomersPage() {
   const { data: agents = [] } = useAgents();
   const { data: credits = [] } = useCredits();
   const { data: sales = [] } = useSales();
+  const { data: stockLogs = [] } = useStockLogs();
   const { data: feedback = [] } = useFeedback();
   const { data: enquiries = [] } = useEnquiries();
   const { data: compensations = [] } = useCompensations();
@@ -46,44 +104,13 @@ export default function CustomersPage() {
   const [filterType, setFilterType] = useState<CustomerType | 'All'>('All');
   const [filterLocation, setFilterLocation] = useState<string>('All');
   const [filterSegment, setFilterSegment] = useState<string>('All');
+  const [filterBizCategory, setFilterBizCategory] = useState<string>('All');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Customer>>({});
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [newSegmentInput, setNewSegmentInput] = useState('');
-  const [editSegmentInput, setEditSegmentInput] = useState('');
-  const [customSegments, setCustomSegments] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    const stored = localStorage.getItem('fudfarmer_custom_segments');
-    return stored ? JSON.parse(stored) : [];
-  });
-
-  const allSegments = useMemo(() => {
-    const merged = [...PREDEFINED_SEGMENTS, ...customSegments];
-    return Array.from(new Set(merged));
-  }, [customSegments]);
-
-  const addCustomSegment = (name: string, target: 'add' | 'edit') => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    if (allSegments.some((s) => s.toLowerCase() === trimmed.toLowerCase())) {
-      toast.error(`Segment "${trimmed}" already exists.`);
-      return;
-    }
-    const updated = [...customSegments, trimmed];
-    setCustomSegments(updated);
-    localStorage.setItem('fudfarmer_custom_segments', JSON.stringify(updated));
-    // Auto-select the new segment
-    if (target === 'add') {
-      setNewCustomer((prev) => ({ ...prev, segments: [...(prev.segments || []), trimmed] }));
-      setNewSegmentInput('');
-    } else {
-      setEditForm((prev) => ({ ...prev, segments: [...(prev.segments || []), trimmed] }));
-      setEditSegmentInput('');
-    }
-    toast.success(`Segment "${trimmed}" created.`);
-  };
+  const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
 
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
     name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C,
@@ -150,20 +177,35 @@ export default function CustomersPage() {
     return { total, b2b, b2c, repeat, totalRevenue, avgValue };
   }, [customers]);
 
+  // --- Auto-segments (derived from each customer's profile) ---
+  const segmentsByCustomer = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    customers.forEach((c) => { map[c.id] = deriveSegments(c); });
+    return map;
+  }, [customers]);
+
   // --- Filtering ---
   const activeSegments = useMemo(() => {
     const segs = new Set<string>();
-    customers.forEach((c) => c.segments?.forEach((s) => segs.add(s)));
-    return Array.from(segs).sort();
+    Object.values(segmentsByCustomer).forEach((list) => list.forEach((s) => segs.add(s)));
+    return Array.from(segs);
+  }, [segmentsByCustomer]);
+
+  const activeBizCategories = useMemo(() => {
+    return Array.from(new Set(customers.map((c) => c.businessCategory).filter(Boolean) as string[])).sort();
   }, [customers]);
 
   const filteredCustomers = useMemo(() => customers.filter((c) => {
-    const matchSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (c.companyName && c.companyName.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchSegment = filterSegment === 'All' || c.segments?.includes(filterSegment);
-    return matchSearch && (filterType === 'All' || c.type === filterType) && (filterLocation === 'All' || c.location === filterLocation) && matchSegment;
-  }), [customers, searchTerm, filterType, filterLocation, filterSegment]);
+    const q = searchTerm.toLowerCase();
+    const matchSearch = c.name.toLowerCase().includes(q) ||
+      c.email.toLowerCase().includes(q) ||
+      (c.companyName && c.companyName.toLowerCase().includes(q)) ||
+      [c.businessCategory, c.jobType, c.employmentStatus, c.ageGroup, c.familyType, c.religion, c.lifestyle, c.maritalStatus]
+        .some((v) => v && v.toLowerCase().includes(q));
+    const matchSegment = filterSegment === 'All' || (segmentsByCustomer[c.id] || []).includes(filterSegment);
+    const matchBiz = filterBizCategory === 'All' || c.businessCategory === filterBizCategory;
+    return matchSearch && (filterType === 'All' || c.type === filterType) && (filterLocation === 'All' || c.location === filterLocation) && matchSegment && matchBiz;
+  }), [customers, searchTerm, filterType, filterLocation, filterSegment, filterBizCategory, segmentsByCustomer]);
 
   // --- Add Customer ---
   const handleSaveCustomer = () => {
@@ -175,18 +217,18 @@ export default function CustomersPage() {
       id: StorageService.generateId(), name: newCustomer.name!, email: newCustomer.email!,
       phone: newCustomer.phone || '', type: newCustomer.type as CustomerType,
       location: newCustomer.location || activeHubs[0]?.name || 'Lagos', companyName: newCustomer.companyName,
-      joinedDate: new Date().toISOString().split('T')[0], segments: newCustomer.segments || [],
+      joinedDate: new Date().toISOString().split('T')[0], segments: [],
       totalOrders: 0, totalSpent: 0, addedByAgentId: newCustomer.addedByAgentId, addedByAgentName: agent?.name,
+      businessCategory: newCustomer.type === CustomerType.B2B ? newCustomer.businessCategory : undefined,
+      familyType: newCustomer.familyType, maritalStatus: newCustomer.maritalStatus, ageGroup: newCustomer.ageGroup,
+      lifestyle: newCustomer.lifestyle, employmentStatus: newCustomer.employmentStatus, jobType: newCustomer.jobType,
+      religion: newCustomer.religion,
     };
+    customer.segments = deriveSegments(customer); // auto-segment from profile
     saveCustomers.mutate([customer, ...customers]);
     setShowAddModal(false);
     setNewCustomer({ name: '', email: '', phone: '', companyName: '', type: CustomerType.B2C, location: activeHubs[0]?.name || 'Lagos', segments: [], totalOrders: 0, totalSpent: 0 });
     toast.success('Customer added.');
-  };
-
-  const toggleSegment = (segment: string) => {
-    const current = newCustomer.segments || [];
-    setNewCustomer({ ...newCustomer, segments: current.includes(segment) ? current.filter((s) => s !== segment) : [...current, segment] });
   };
 
   // --- Edit Customer ---
@@ -198,16 +240,18 @@ export default function CustomersPage() {
 
   const handleUpdateCustomer = () => {
     if (!editForm.name || !editForm.email) { toast.error('Name and Email are required.'); return; }
-    const updated = customers.map((c) => c.id === selectedCustomer?.id ? { ...c, ...editForm } as Customer : c);
+    const updated = customers.map((c) => {
+      if (c.id !== selectedCustomer?.id) return c;
+      const merged = { ...c, ...editForm } as Customer;
+      merged.segments = deriveSegments(merged); // re-derive on profile change
+      return merged;
+    });
     saveCustomers.mutate(updated);
-    setSelectedCustomer({ ...selectedCustomer!, ...editForm } as Customer);
+    const mergedSel = { ...selectedCustomer!, ...editForm } as Customer;
+    mergedSel.segments = deriveSegments(mergedSel);
+    setSelectedCustomer(mergedSel);
     setIsEditing(false);
     toast.success('Customer updated.');
-  };
-
-  const toggleEditSegment = (segment: string) => {
-    const current = editForm.segments || [];
-    setEditForm({ ...editForm, segments: current.includes(segment) ? current.filter((s) => s !== segment) : [...current, segment] });
   };
 
   // --- Customer detail data ---
@@ -266,11 +310,101 @@ export default function CustomersPage() {
     };
   }, [customerSales]);
 
+  // --- Purchase pattern & decision analytics ---
+  const DAY = 86_400_000;
+  const purchaseAnalytics = useMemo(() => {
+    if (customerSales.length === 0) return null;
+    const asc = [...customerSales].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const n = asc.length;
+    const now = Date.now();
+    const totalSpent = asc.reduce((a, s) => a + s.amount, 0);
+    const totalProfit = asc.reduce((a, s) => a + (s.profitAmount || 0), 0);
+    const aov = totalSpent / n;
+    const avgMargin = totalSpent > 0 ? (totalProfit / totalSpent) * 100 : 0;
+    const firstMs = new Date(asc[0].date).getTime();
+    const lastMs = new Date(asc[n - 1].date).getTime();
+    const daysSinceLast = Math.max(0, Math.floor((now - lastMs) / DAY));
+    const tenureDays = Math.max(1, Math.floor((lastMs - firstMs) / DAY));
+
+    // Inter-purchase intervals → regularity
+    const intervals: number[] = [];
+    for (let i = 1; i < n; i++) intervals.push((new Date(asc[i].date).getTime() - new Date(asc[i - 1].date).getTime()) / DAY);
+    const avgInterval = intervals.length ? intervals.reduce((a, b) => a + b, 0) / intervals.length : 0;
+    let regularity = 'Single order';
+    if (intervals.length === 1) regularity = 'New';
+    else if (intervals.length >= 2) {
+      const mean = avgInterval;
+      const cv = mean > 0 ? Math.sqrt(intervals.reduce((a, b) => a + (b - mean) ** 2, 0) / intervals.length) / mean : 0;
+      regularity = cv < 0.45 ? 'Regular' : cv < 0.85 ? 'Semi-regular' : 'Sporadic';
+    }
+    const ordersPerMonth = n / Math.max(1, tenureDays / 30);
+
+    // Trend: last 90d vs prior 90d spend
+    const recent = asc.filter((s) => now - new Date(s.date).getTime() <= 90 * DAY).reduce((a, s) => a + s.amount, 0);
+    const prior = asc.filter((s) => { const d = now - new Date(s.date).getTime(); return d > 90 * DAY && d <= 180 * DAY; }).reduce((a, s) => a + s.amount, 0);
+    let trend: 'Growing' | 'Stable' | 'Declining' = 'Stable';
+    let trendPct = 0;
+    if (prior > 0) { trendPct = Math.round(((recent - prior) / prior) * 100); trend = trendPct > 15 ? 'Growing' : trendPct < -15 ? 'Declining' : 'Stable'; }
+    else if (recent > 0) { trend = 'Growing'; trendPct = 100; }
+
+    // Activity / churn risk from recency vs cadence
+    let activity: 'Active' | 'At Risk' | 'Dormant' = 'Active';
+    if (avgInterval > 0) { if (daysSinceLast > avgInterval * 3) activity = 'Dormant'; else if (daysSinceLast > avgInterval * 1.8) activity = 'At Risk'; }
+    else if (daysSinceLast > 90) activity = 'Dormant';
+    const nextExpected = avgInterval > 0 ? new Date(lastMs + avgInterval * DAY) : null;
+
+    // Channel & payment mix
+    const channelCounts: Record<string, number> = {};
+    asc.forEach((s) => { const ch = s.channel || 'Unspecified'; channelCounts[ch] = (channelCounts[ch] || 0) + 1; });
+    const preferredChannel = Object.entries(channelCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+    const creditCount = asc.filter((s) => s.isCredit).length;
+    const biggest = asc.reduce((m, s) => (s.amount > m.amount ? s : m), asc[0]);
+
+    // Decision recommendation
+    let rec = { tone: 'neutral' as 'good' | 'warn' | 'neutral', text: '' };
+    if (activity === 'Dormant') rec = { tone: 'warn', text: `No order in ${daysSinceLast} days (usually every ~${Math.round(avgInterval) || '—'}). Win-back outreach recommended.` };
+    else if (activity === 'At Risk') rec = { tone: 'warn', text: `Overdue for a reorder — ${daysSinceLast} days since last vs ~${Math.round(avgInterval)}-day cadence. Follow up now.` };
+    else if (trend === 'Growing' && totalSpent >= 200000) rec = { tone: 'good', text: `Spend up ${trendPct}% recently — strong account. Upsell higher-margin lines or offer priority delivery.` };
+    else if (regularity === 'Regular') rec = { tone: 'good', text: `Predictable buyer (~every ${Math.round(avgInterval)} days). Good candidate for a standing order or subscription.` };
+    else if (trend === 'Declining') rec = { tone: 'warn', text: `Spend down ${Math.abs(trendPct)}% vs prior quarter. Check satisfaction and re-engage.` };
+    else rec = { tone: 'neutral', text: `${regularity} buyer, ${activity.toLowerCase()}. Nurture toward a regular cadence.` };
+
+    return { n, totalSpent, totalProfit, aov, avgMargin, daysSinceLast, avgInterval, regularity, ordersPerMonth, trend, trendPct, activity, nextExpected, preferredChannel, creditCount, cashCount: n - creditCount, biggest, firstDate: asc[0].date, lastDate: asc[n - 1].date, rec };
+  }, [customerSales]);
+
+  // --- Products this customer buys (from SALE stock logs linked via referenceId) ---
+  const customerProducts = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const saleIds = new Set(customerSales.map((s) => s.id));
+    const map: Record<string, { itemName: string; uom: string; qty: number; revenue: number; orders: number }> = {};
+    stockLogs.forEach((l) => {
+      if (l.type !== StockMovementType.SALE || !l.referenceId || !saleIds.has(l.referenceId)) return;
+      const q = Math.abs(l.quantity);
+      const e = map[l.itemId] || { itemName: l.itemName, uom: l.uom, qty: 0, revenue: 0, orders: 0 };
+      e.qty += q; e.revenue += q * l.unitPrice; e.orders += 1; map[l.itemId] = e;
+    });
+    return Object.values(map).sort((a, b) => b.revenue - a.revenue);
+  }, [selectedCustomer, customerSales, stockLogs]);
+
+  const stockLogsForSale = (saleId: string) => stockLogs.filter((l) => l.referenceId === saleId && l.type === StockMovementType.SALE);
+
   const handleViewDetails = (customer: Customer) => {
     setSelectedCustomer(customer);
     setDetailTab('overview');
     setIsEditing(false);
+    setExpandedSaleId(null);
   };
+
+  // Deep-link: open a customer from ?open=<id> (e.g. clicked from Inventory)
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current || customers.length === 0) return;
+    const id = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('open') : null;
+    deepLinkHandled.current = true;
+    if (!id) return;
+    const c = customers.find((x) => x.id === id);
+    if (c) handleViewDetails(c);
+  }, [customers]);
 
   // --- Render ---
   return (
@@ -344,6 +478,15 @@ export default function CustomersPage() {
               </select>
             </div>
           )}
+          {activeBizCategories.length > 0 && (
+            <div className="flex items-center gap-2 border rounded-md px-3 py-2 bg-background">
+              <Building2 size={14} className="text-muted-foreground" />
+              <select value={filterBizCategory} onChange={(e) => setFilterBizCategory(e.target.value)} className="bg-transparent border-none text-sm font-medium focus:outline-none">
+                <option value="All">All Business Types</option>
+                {activeBizCategories.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
         </div>
         <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">{filteredCustomers.length} customer{filteredCustomers.length !== 1 ? 's' : ''}</span>
       </div>
@@ -397,13 +540,18 @@ export default function CustomersPage() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <div className="flex flex-wrap gap-1 max-w-[200px]">
-                        {customer.segments?.slice(0, 3).map((seg) => (
-                          <span key={seg} className="inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{seg}</span>
-                        ))}
-                        {(customer.segments?.length || 0) > 3 && <span className="text-[10px] text-muted-foreground">+{customer.segments!.length - 3}</span>}
-                        {(!customer.segments || customer.segments.length === 0) && <span className="text-xs text-muted-foreground/50">—</span>}
-                      </div>
+                      {(() => {
+                        const segs = segmentsByCustomer[customer.id] || [];
+                        return (
+                          <div className="flex flex-wrap gap-1 max-w-[240px]">
+                            {segs.slice(0, 3).map((seg) => (
+                              <span key={seg} className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-medium ${segClass(seg)}`}>{seg}</span>
+                            ))}
+                            {segs.length > 3 && <span className="text-[10px] text-muted-foreground self-center">+{segs.length - 3}</span>}
+                            {segs.length === 0 && <span className="text-xs text-muted-foreground/50">—</span>}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="p-4 text-right">
                       <span className="font-medium">{customer.totalOrders}</span>
@@ -443,50 +591,25 @@ export default function CustomersPage() {
               <div className="space-y-2"><label className="text-sm font-medium">Location</label><select value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">{activeHubs.map(h => <option key={h.id} value={h.name}>{h.name}</option>)}</select></div>
               <div className="space-y-2"><label className="text-sm font-medium">Assigned Agent</label><select value={newCustomer.addedByAgentId || ''} onChange={(e) => setNewCustomer({ ...newCustomer, addedByAgentId: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"><option value="">-- Select --</option>{agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
             </div>
-            <div className="mt-4 space-y-2 md:col-span-2">
-              <label className="text-sm font-medium">Segments</label>
-              {/* Selected segments */}
-              {(newCustomer.segments?.length || 0) > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {newCustomer.segments!.map((seg) => (
-                    <span key={seg} className="inline-flex items-center gap-1 rounded-full bg-primary text-primary-foreground px-2.5 py-1 text-xs font-medium">
-                      {seg}
-                      <button onClick={() => toggleSegment(seg)} className="ml-0.5 hover:bg-primary-foreground/20 rounded-full p-0.5"><X size={10} /></button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              {/* Dropdown to pick existing segment */}
-              <div className="flex gap-2">
-                <select
-                  value=""
-                  onChange={(e) => { if (e.target.value) toggleSegment(e.target.value); }}
-                  className="flex h-10 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">Select a segment...</option>
-                  {allSegments.filter((s) => !newCustomer.segments?.includes(s)).map((seg) => (
-                    <option key={seg} value={seg}>{seg}</option>
-                  ))}
-                </select>
-              </div>
-              {/* Add new segment inline */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="New segment name..."
-                  value={newSegmentInput}
-                  onChange={(e) => setNewSegmentInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomSegment(newSegmentInput, 'add'); } }}
-                  className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <button
-                  onClick={() => addCustomSegment(newSegmentInput, 'add')}
-                  disabled={!newSegmentInput.trim()}
-                  className="inline-flex items-center gap-1.5 rounded-md text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 h-9 px-3 disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  <Plus size={12} /> Add Segment
-                </button>
-              </div>
+            {/* Type-specific profile */}
+            <div className="mt-4 space-y-3 border-t pt-4">
+              <label className="text-sm font-semibold flex items-center gap-1.5">
+                {newCustomer.type === CustomerType.B2B ? <Building2 size={15} className="text-blue-600" /> : <User size={15} className="text-purple-600" />}
+                {newCustomer.type === CustomerType.B2B ? 'Business Profile' : 'Consumer Profile'}
+              </label>
+              <CustomerProfileFields type={(newCustomer.type as CustomerType) || CustomerType.B2C} data={newCustomer} onChange={(patch) => setNewCustomer({ ...newCustomer, ...patch })} />
+            </div>
+            {/* Auto-generated segments preview */}
+            <div className="mt-4 space-y-2 rounded-lg border bg-muted/20 p-3">
+              <label className="text-sm font-medium flex items-center gap-1.5"><Sparkles size={14} className="text-primary" /> Auto Segments <span className="text-[11px] font-normal text-muted-foreground">— generated from the profile above</span></label>
+              {(() => {
+                const preview = deriveSegments({ ...newCustomer, id: 'preview', segments: [], totalOrders: newCustomer.totalOrders || 0, totalSpent: newCustomer.totalSpent || 0 } as Customer);
+                return preview.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {preview.map((seg) => <span key={seg} className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${segClass(seg)}`}>{seg}</span>)}
+                  </div>
+                ) : <p className="text-xs text-muted-foreground">Fill in the profile to generate segments.</p>;
+              })()}
             </div>
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={() => setShowAddModal(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
@@ -590,6 +713,42 @@ export default function CustomersPage() {
                     )}
                   </div>
 
+                  {/* Type-specific profile */}
+                  <div>
+                    <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2 flex items-center gap-1.5">
+                      {selectedCustomer.type === CustomerType.B2B ? <Building2 size={12} /> : <User size={12} />}
+                      {selectedCustomer.type === CustomerType.B2B ? 'Business Profile' : 'Consumer Profile'}
+                    </h4>
+                    {(() => {
+                      const rows = selectedCustomer.type === CustomerType.B2B
+                        ? [{ icon: Tag, label: 'Category', value: selectedCustomer.businessCategory }]
+                        : [
+                            { icon: Home, label: 'Family Type', value: selectedCustomer.familyType },
+                            { icon: Heart, label: 'Marital Status', value: selectedCustomer.maritalStatus },
+                            { icon: Cake, label: 'Age Group', value: selectedCustomer.ageGroup },
+                            { icon: HeartPulse, label: 'Lifestyle & Health', value: selectedCustomer.lifestyle },
+                            { icon: Briefcase, label: 'Employment', value: selectedCustomer.employmentStatus },
+                            { icon: Briefcase, label: 'Job Type', value: selectedCustomer.jobType },
+                            { icon: Church, label: 'Religion', value: selectedCustomer.religion },
+                          ];
+                      const filled = rows.filter((r) => r.value);
+                      if (filled.length === 0) return <p className="text-xs text-muted-foreground/60 border rounded-lg p-3">No profile details captured yet — use Edit to add them.</p>;
+                      return (
+                        <div className="grid grid-cols-2 gap-2">
+                          {filled.map((r) => {
+                            const Icon = r.icon;
+                            return (
+                              <div key={r.label} className="flex items-center gap-2 p-2.5 rounded-lg border bg-muted/20">
+                                <Icon size={14} className="text-muted-foreground shrink-0" />
+                                <div className="min-w-0"><p className="text-[10px] font-bold uppercase text-muted-foreground">{r.label}</p><p className="text-sm font-medium truncate">{r.value}</p></div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
                   {/* KPI Cards */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-4 rounded-xl border bg-muted/20">
@@ -610,17 +769,22 @@ export default function CustomersPage() {
                     </div>
                   </div>
 
-                  {/* Segments */}
-                  {selectedCustomer.segments && selectedCustomer.segments.length > 0 && (
-                    <div>
-                      <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2">Segments</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedCustomer.segments.map((seg) => (
-                          <span key={seg} className="inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium">{seg}</span>
-                        ))}
+                  {/* Auto Segments */}
+                  {(() => {
+                    const segs = deriveSegments(selectedCustomer);
+                    return (
+                      <div>
+                        <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2 flex items-center gap-1.5"><Sparkles size={12} className="text-primary" /> Auto Segments <span className="font-normal normal-case text-muted-foreground/70">· generated from profile</span></h4>
+                        {segs.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {segs.map((seg) => (
+                              <span key={seg} className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${segClass(seg)}`}>{seg}</span>
+                            ))}
+                          </div>
+                        ) : <p className="text-xs text-muted-foreground/60">No segments yet — add profile details to generate them.</p>}
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Quick Spending Trend */}
                   {spendingTrend.length > 1 && (
@@ -681,48 +845,23 @@ export default function CustomersPage() {
                       </select>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">Segments</label>
-                    {/* Selected segments */}
-                    {(editForm.segments?.length || 0) > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {editForm.segments!.map((seg) => (
-                          <span key={seg} className="inline-flex items-center gap-1 rounded-full bg-primary text-primary-foreground px-2.5 py-1 text-xs font-medium">
-                            {seg}
-                            <button onClick={() => toggleEditSegment(seg)} className="ml-0.5 hover:bg-primary-foreground/20 rounded-full p-0.5"><X size={10} /></button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {/* Dropdown */}
-                    <select
-                      value=""
-                      onChange={(e) => { if (e.target.value) toggleEditSegment(e.target.value); }}
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                      <option value="">Select a segment...</option>
-                      {allSegments.filter((s) => !editForm.segments?.includes(s)).map((seg) => (
-                        <option key={seg} value={seg}>{seg}</option>
-                      ))}
-                    </select>
-                    {/* Add new segment */}
-                    <div className="flex gap-2 mt-1.5">
-                      <input
-                        type="text"
-                        placeholder="New segment name..."
-                        value={editSegmentInput}
-                        onChange={(e) => setEditSegmentInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomSegment(editSegmentInput, 'edit'); } }}
-                        className="flex h-8 flex-1 rounded-md border border-input bg-background px-3 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                      />
-                      <button
-                        onClick={() => addCustomSegment(editSegmentInput, 'edit')}
-                        disabled={!editSegmentInput.trim()}
-                        className="inline-flex items-center gap-1 rounded-md text-xs font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 h-8 px-2.5 disabled:opacity-50 disabled:pointer-events-none"
-                      >
-                        <Plus size={11} /> Add
-                      </button>
-                    </div>
+                  <div className="space-y-2 border-t pt-3">
+                    <label className="text-xs font-semibold flex items-center gap-1.5">
+                      {editForm.type === CustomerType.B2B ? <Building2 size={13} className="text-blue-600" /> : <User size={13} className="text-purple-600" />}
+                      {editForm.type === CustomerType.B2B ? 'Business Profile' : 'Consumer Profile'}
+                    </label>
+                    <CustomerProfileFields type={(editForm.type as CustomerType) || CustomerType.B2C} data={editForm} onChange={(patch) => setEditForm({ ...editForm, ...patch })} dense />
+                  </div>
+                  <div className="space-y-1.5 rounded-lg border bg-muted/20 p-3">
+                    <label className="text-xs font-medium flex items-center gap-1.5"><Sparkles size={12} className="text-primary" /> Auto Segments <span className="font-normal text-muted-foreground">— update as you edit the profile</span></label>
+                    {(() => {
+                      const preview = deriveSegments({ ...selectedCustomer, ...editForm } as Customer);
+                      return preview.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {preview.map((seg) => <span key={seg} className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${segClass(seg)}`}>{seg}</span>)}
+                        </div>
+                      ) : <p className="text-xs text-muted-foreground">Fill in the profile to generate segments.</p>;
+                    })()}
                   </div>
                   <div className="flex justify-end gap-3 pt-2">
                     <button onClick={() => setIsEditing(false)} className="inline-flex items-center rounded-md text-sm font-medium border border-input bg-background hover:bg-accent h-9 px-4 py-2">Cancel</button>
@@ -735,109 +874,156 @@ export default function CustomersPage() {
 
               {/* ===== PURCHASES TAB ===== */}
               {detailTab === 'purchases' && (
-                <div className="space-y-5">
-                  {/* Purchase summary cards */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="p-3 rounded-lg border bg-muted/20 text-center">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground">Total Purchases</p>
-                      <p className="text-xl font-black">{customerSales.length}</p>
-                    </div>
-                    <div className="p-3 rounded-lg border bg-muted/20 text-center">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground">Cash Sales</p>
-                      <p className="text-lg font-black text-green-600">{creditSaleStats.cashCount}</p>
-                      <p className="text-[10px] text-muted-foreground">&#8358;{creditSaleStats.cashTotal.toLocaleString()}</p>
-                    </div>
-                    <div className="p-3 rounded-lg border bg-muted/20 text-center">
-                      <p className="text-[10px] font-bold uppercase text-muted-foreground">Credit Sales</p>
-                      <p className="text-lg font-black text-orange-600">{creditSaleStats.creditCount}</p>
-                      <p className="text-[10px] text-muted-foreground">&#8358;{creditSaleStats.creditTotal.toLocaleString()}</p>
-                    </div>
+                customerSales.length === 0 || !purchaseAnalytics ? (
+                  <div className="p-8 text-center text-muted-foreground border rounded-lg">
+                    <ShoppingCart size={32} className="mx-auto mb-2 opacity-40" />
+                    <p className="text-sm">No purchases recorded yet.</p>
                   </div>
-
-                  {/* Spending trend chart */}
-                  {spendingTrend.length > 1 && (
-                    <div>
-                      <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2">Monthly Spending</h4>
-                      <div className="h-40 w-full">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={spendingTrend}>
-                            <defs>
-                              <linearGradient id="spendGradPurchase" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <XAxis dataKey="month" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
-                            <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
-                            <RechartsTooltip formatter={(value) => [`₦${Number(value).toLocaleString()}`, 'Spent']} />
-                            <Area type="monotone" dataKey="amount" stroke="hsl(var(--primary))" fill="url(#spendGradPurchase)" strokeWidth={2} />
-                          </AreaChart>
-                        </ResponsiveContainer>
+                ) : (() => {
+                  const pa = purchaseAnalytics;
+                  const actClr = pa.activity === 'Active' ? 'bg-green-100 text-green-700 border-green-200' : pa.activity === 'At Risk' ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-red-100 text-red-700 border-red-200';
+                  const recClr = pa.rec.tone === 'good' ? 'border-green-200 bg-green-50/60 text-green-800' : pa.rec.tone === 'warn' ? 'border-orange-200 bg-orange-50/60 text-orange-800' : 'border-border bg-muted/30 text-foreground';
+                  const chIcon = (ch?: string) => ch === 'Delivery' ? <Truck size={11} /> : ch === 'Pre-Order' ? <Clock size={11} /> : <Package size={11} />;
+                  return (
+                  <div className="space-y-5">
+                    {/* Decision recommendation banner */}
+                    <div className={`flex items-start gap-2.5 rounded-xl border p-3 ${recClr}`}>
+                      <Sparkles size={16} className="mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wide opacity-70">Recommended Action</p>
+                        <p className="text-sm font-medium leading-snug">{pa.rec.text}</p>
                       </div>
                     </div>
-                  )}
 
-                  {/* Full purchase history list */}
-                  <div>
-                    <h4 className="text-xs font-bold uppercase text-muted-foreground mb-3">All Purchases ({customerSales.length})</h4>
-                    {customerSales.length === 0 ? (
-                      <div className="p-8 text-center text-muted-foreground border rounded-lg">
-                        <ShoppingCart size={32} className="mx-auto mb-2 opacity-40" />
-                        <p className="text-sm">No purchases recorded yet.</p>
+                    {/* Decision KPI grid */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="p-3 rounded-xl border bg-muted/20"><p className="text-[10px] font-bold uppercase text-muted-foreground flex items-center gap-1"><Wallet size={11} /> Lifetime Value</p><p className="text-lg font-black">{`₦${Math.round(pa.totalSpent).toLocaleString()}`}</p></div>
+                      <div className="p-3 rounded-xl border bg-muted/20"><p className="text-[10px] font-bold uppercase text-muted-foreground flex items-center gap-1"><TrendingUp size={11} /> Profit</p><p className="text-lg font-black text-green-700">{`₦${Math.round(pa.totalProfit).toLocaleString()}`}</p><p className="text-[10px] text-muted-foreground">{pa.avgMargin.toFixed(0)}% margin</p></div>
+                      <div className="p-3 rounded-xl border bg-muted/20"><p className="text-[10px] font-bold uppercase text-muted-foreground flex items-center gap-1"><ShoppingCart size={11} /> Avg Order</p><p className="text-lg font-black">{`₦${Math.round(pa.aov).toLocaleString()}`}</p><p className="text-[10px] text-muted-foreground">{pa.n} order{pa.n !== 1 ? 's' : ''}</p></div>
+                      <div className="p-3 rounded-xl border bg-muted/20"><p className="text-[10px] font-bold uppercase text-muted-foreground flex items-center gap-1"><Repeat size={11} /> Frequency</p><p className="text-lg font-black">{pa.avgInterval > 0 ? `~${Math.round(pa.avgInterval)}d` : '—'}</p><p className="text-[10px] text-muted-foreground">{pa.ordersPerMonth.toFixed(1)}/mo</p></div>
+                      <div className="p-3 rounded-xl border bg-muted/20"><p className="text-[10px] font-bold uppercase text-muted-foreground flex items-center gap-1"><Timer size={11} /> Recency</p><p className="text-lg font-black">{pa.daysSinceLast}d ago</p><span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold border ${actClr}`}>{pa.activity}</span></div>
+                      <div className="p-3 rounded-xl border bg-muted/20"><p className="text-[10px] font-bold uppercase text-muted-foreground flex items-center gap-1">{pa.trend === 'Declining' ? <TrendingDown size={11} /> : <TrendingUp size={11} />} Trend (90d)</p><p className={`text-lg font-black ${pa.trend === 'Growing' ? 'text-green-700' : pa.trend === 'Declining' ? 'text-red-600' : ''}`}>{pa.trend}</p><p className="text-[10px] text-muted-foreground">{pa.trendPct > 0 ? '+' : ''}{pa.trendPct}% vs prior</p></div>
+                    </div>
+
+                    {/* Purchase pattern */}
+                    <div>
+                      <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2 flex items-center gap-1.5"><Activity size={12} /> Purchase Pattern</h4>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="flex items-center justify-between p-2.5 rounded-lg border"><span className="text-muted-foreground flex items-center gap-1.5"><Gauge size={13} /> Cadence</span><span className="font-semibold">{pa.regularity}</span></div>
+                        <div className="flex items-center justify-between p-2.5 rounded-lg border"><span className="text-muted-foreground flex items-center gap-1.5">{chIcon(pa.preferredChannel)} Top Channel</span><span className="font-semibold">{pa.preferredChannel}</span></div>
+                        <div className="flex items-center justify-between p-2.5 rounded-lg border"><span className="text-muted-foreground flex items-center gap-1.5"><CreditCard size={13} /> Cash / Credit</span><span className="font-semibold">{pa.cashCount} / {pa.creditCount}</span></div>
+                        <div className="flex items-center justify-between p-2.5 rounded-lg border"><span className="text-muted-foreground flex items-center gap-1.5"><Calendar size={13} /> Next expected</span><span className="font-semibold">{pa.nextExpected ? pa.nextExpected.toISOString().slice(0, 10) : '—'}</span></div>
+                        <div className="flex items-center justify-between p-2.5 rounded-lg border col-span-2"><span className="text-muted-foreground flex items-center gap-1.5"><Flame size={13} /> Biggest order</span><span className="font-semibold">{`₦${pa.biggest.amount.toLocaleString()}`} · {pa.biggest.date}</span></div>
                       </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {customerSales.map((sale) => (
-                          <div key={sale.id} className="p-3 rounded-lg border hover:bg-muted/30 transition-colors">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-sm font-medium truncate">{sale.productDetails || 'Sale'}</span>
-                                  {sale.isCredit && (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold text-orange-700 border border-orange-200">
-                                      <CreditCard size={10} /> Credit
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                                  <span className="inline-flex items-center gap-1"><Calendar size={10} /> {sale.date}</span>
-                                  {sale.channel && <span className="inline-flex items-center gap-1">{sale.channel === 'Delivery' ? <Truck size={10} /> : sale.channel === 'Pre-Order' ? <Clock size={10} /> : <Package size={10} />} {sale.channel}</span>}
-                                  <span>{sale.agentName}</span>
-                                </div>
-                                {sale.deliveryStatus && sale.deliveryStatus !== 'N/A' && (
-                                  <div className="mt-1">
-                                    <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                                      sale.deliveryStatus === 'Delivered' || sale.deliveryStatus === 'Confirmed by Customer' ? 'bg-green-100 text-green-700' :
-                                      sale.deliveryStatus === 'In Transit' ? 'bg-blue-100 text-blue-700' :
-                                      'bg-yellow-100 text-yellow-700'
-                                    }`}>
-                                      <Truck size={10} /> {sale.deliveryStatus}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="text-right shrink-0">
-                                <p className="text-sm font-bold">&#8358;{sale.amount.toLocaleString()}</p>
-                                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                                  sale.status === 'Paid' ? 'bg-green-100 text-green-700' :
-                                  sale.status === 'Approved' ? 'bg-blue-100 text-blue-700' :
-                                  'bg-yellow-100 text-yellow-700'
-                                }`}>{sale.status}</span>
-                              </div>
-                            </div>
-                            {sale.notes && <p className="text-xs text-muted-foreground mt-2 italic border-t pt-2">{sale.notes}</p>}
-                          </div>
-                        ))}
+                    </div>
 
-                        {/* Running total */}
-                        <div className="p-3 rounded-lg border-2 border-dashed bg-muted/10 flex justify-between items-center">
-                          <span className="text-sm font-medium text-muted-foreground">Total from {customerSales.length} purchase{customerSales.length !== 1 ? 's' : ''}</span>
-                          <span className="text-lg font-black">&#8358;{customerSales.reduce((a, s) => a + s.amount, 0).toLocaleString()}</span>
+                    {/* Monthly spend chart */}
+                    {spendingTrend.length > 1 && (
+                      <div>
+                        <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2">Monthly Spending</h4>
+                        <div className="h-36 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={spendingTrend}>
+                              <defs><linearGradient id="spendGradPurchase" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} /><stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} /></linearGradient></defs>
+                              <XAxis dataKey="month" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+                              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
+                              <RechartsTooltip formatter={(value) => [`₦${Number(value).toLocaleString()}`, 'Spent']} />
+                              <Area type="monotone" dataKey="amount" stroke="hsl(var(--primary))" fill="url(#spendGradPurchase)" strokeWidth={2} />
+                            </AreaChart>
+                          </ResponsiveContainer>
                         </div>
                       </div>
                     )}
+
+                    {/* Top products bought */}
+                    {customerProducts.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-bold uppercase text-muted-foreground mb-2 flex items-center gap-1.5"><Boxes size={12} /> Most Bought Products</h4>
+                        <div className="space-y-1.5">
+                          {customerProducts.slice(0, 5).map((p) => (
+                            <div key={p.itemName} className="flex items-center justify-between p-2.5 rounded-lg border text-sm">
+                              <span className="font-medium">{p.itemName}</span>
+                              <span className="text-muted-foreground text-xs">{p.qty} {p.uom} · <span className="font-semibold text-foreground">{`₦${Math.round(p.revenue).toLocaleString()}`}</span></span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Detailed purchase table with drill-down */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-bold uppercase text-muted-foreground">All Purchases ({customerSales.length})</h4>
+                        <span className="text-[10px] text-muted-foreground">Click a row to drill down</span>
+                      </div>
+                      <div className="rounded-lg border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              <th className="text-left font-semibold px-3 py-2">Date</th>
+                              <th className="text-left font-semibold px-3 py-2">Order</th>
+                              <th className="text-right font-semibold px-3 py-2">Amount</th>
+                              <th className="text-center font-semibold px-3 py-2">Status</th>
+                              <th className="w-8 px-2 py-2"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {customerSales.map((sale) => {
+                              const isOpen = expandedSaleId === sale.id;
+                              const items = stockLogsForSale(sale.id);
+                              return (
+                                <Fragment key={sale.id}>
+                                  <tr onClick={() => setExpandedSaleId(isOpen ? null : sale.id)} className={`border-b cursor-pointer transition-colors ${isOpen ? 'bg-muted/40' : 'hover:bg-muted/30'}`}>
+                                    <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">{sale.date}</td>
+                                    <td className="px-3 py-2.5"><div className="flex items-center gap-1.5 max-w-[220px]"><span className="text-muted-foreground shrink-0">{chIcon(sale.channel)}</span><span className="truncate">{sale.productDetails || 'Sale'}</span>{sale.isCredit && <CreditCard size={11} className="text-orange-500 shrink-0" />}</div></td>
+                                    <td className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{`₦${sale.amount.toLocaleString()}`}</td>
+                                    <td className="px-3 py-2.5 text-center"><span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${sale.status === 'Paid' ? 'bg-green-100 text-green-700' : sale.status === 'Approved' ? 'bg-blue-100 text-blue-700' : sale.status === 'Voided' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{sale.status}</span></td>
+                                    <td className="px-2 py-2.5 text-muted-foreground"><ChevronDown size={15} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} /></td>
+                                  </tr>
+                                  {isOpen && (
+                                    <tr className="border-b bg-muted/10">
+                                      <td colSpan={5} className="px-4 py-4">
+                                        {sale.productDetails && <p className="text-sm font-medium mb-3">{sale.productDetails}</p>}
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3">
+                                          <div><p className="text-[10px] font-bold uppercase text-muted-foreground">Channel</p><p className="text-sm font-medium">{sale.channel || '—'}</p></div>
+                                          <div><p className="text-[10px] font-bold uppercase text-muted-foreground">Profit</p><p className="text-sm font-medium text-green-700">{`₦${(sale.profitAmount || 0).toLocaleString()}`} <span className="text-[10px] text-muted-foreground">{sale.profitMargin || 0}%</span></p></div>
+                                          <div><p className="text-[10px] font-bold uppercase text-muted-foreground">Payment</p><p className="text-sm font-medium">{sale.isCredit ? `Credit${sale.paymentTerms ? ` · ${sale.paymentTerms}` : ''}` : (sale.paymentType || 'Cash')}</p></div>
+                                          {sale.amountPaid != null && <div><p className="text-[10px] font-bold uppercase text-muted-foreground">Amount Paid</p><p className="text-sm font-medium">{`₦${sale.amountPaid.toLocaleString()}`}</p></div>}
+                                          {sale.deliveryStatus && sale.deliveryStatus !== 'N/A' && <div><p className="text-[10px] font-bold uppercase text-muted-foreground">Delivery</p><p className="text-sm font-medium">{sale.deliveryStatus}</p></div>}
+                                          <div><p className="text-[10px] font-bold uppercase text-muted-foreground">Agent</p><p className="text-sm font-medium">{sale.agentName}</p></div>
+                                        </div>
+                                        {sale.deliveryAddress && <p className="mt-3 text-xs text-muted-foreground flex items-center gap-1.5"><MapPin size={11} /> {sale.deliveryAddress}</p>}
+                                        {items.length > 0 && (
+                                          <div className="mt-3 pt-3 border-t">
+                                            <p className="text-[10px] font-bold uppercase text-muted-foreground mb-1.5">Line Items</p>
+                                            <div className="space-y-1">
+                                              {items.map((it) => (
+                                                <div key={it.id} className="flex items-center justify-between text-xs"><span>{it.itemName}</span><span className="text-muted-foreground">{Math.abs(it.quantity)} {it.uom} @ {`₦${it.unitPrice.toLocaleString()}`}</span></div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {sale.notes && <p className="mt-3 pt-3 border-t text-xs text-muted-foreground italic">{sale.notes}</p>}
+                                      </td>
+                                    </tr>
+                                  )}
+                                </Fragment>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-muted/20 border-t-2 border-dashed">
+                              <td colSpan={2} className="px-3 py-2.5 text-sm font-medium text-muted-foreground">Total · {customerSales.length} order{customerSales.length !== 1 ? 's' : ''}</td>
+                              <td className="px-3 py-2.5 text-right text-base font-black whitespace-nowrap">{`₦${customerSales.reduce((a, s) => a + s.amount, 0).toLocaleString()}`}</td>
+                              <td colSpan={2}></td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                  );
+                })()
               )}
 
               {/* ===== CREDIT & PAYMENTS TAB ===== */}

@@ -1,17 +1,19 @@
 'use client';
 
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
 import { useSales, useSaveSales, useCustomers, useSaveCustomers, useAgents, useInventory, useSaveInventory, useStockLogs, useSaveStockLogs, useCredits, useSaveCredits, useHubs } from '@/hooks/use-queries';
 import { StorageService } from '@/lib/storage-service';
-import { Sale, Customer, InventoryItem, StockLog, StockMovementType, CreditRecord, PaymentTerms, SalesChannel, DeliveryStatus, PaymentType, PaymentMode } from '@/types';
+import { deriveSegments } from '@/lib/segmentation';
+import { Sale, SaleItem, Customer, InventoryItem, StockLog, StockMovementType, CreditRecord, PaymentTerms, SalesChannel, DeliveryStatus, PaymentType, PaymentMode } from '@/types';
 import { toast } from 'sonner';
 import {
   Plus, Banknote, Search, TrendingUp, TrendingDown, X, Package, Percent, CreditCard,
   MapPin, AlertTriangle, FileText, Truck, ChevronRight, Edit3, Save, Trash2,
   ArrowUpRight, ArrowDownRight, Calendar, Upload, Download, ShoppingCart, Users,
-  Eye, Check, Clock, ArrowRightLeft, BarChart3, Filter,
+  Eye, Check, Clock, ArrowRightLeft, BarChart3, Filter, Boxes,
 } from 'lucide-react';
 
 type DetailTab = 'overview' | 'delivery' | 'history';
@@ -78,6 +80,10 @@ export default function SalesPage() {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedHub, setSelectedHub] = useState<string>(user?.location || 'Lagos');
   const [quantity, setQuantity] = useState(1);
+  // ── Cart: multiple line items in one sale ──
+  const [lineItems, setLineItems] = useState<{ itemId: string; quantity: number; unitPrice: number }[]>([]);
+  const [draftPrice, setDraftPrice] = useState(0);
+  const router = useRouter();
   const [isCredit, setIsCredit] = useState(false);
   const [paymentMode, setPaymentMode] = useState<PaymentMode>(PaymentMode.FULL_PAYMENT);
   const [paymentType, setPaymentType] = useState<PaymentType>(PaymentType.CASH);
@@ -88,6 +94,14 @@ export default function SalesPage() {
   // ── Detail panel ──
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>('overview');
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (openedRef.current || sales.length === 0) return;
+    const id = new URLSearchParams(window.location.search).get('open');
+    if (!id) return;
+    const s = sales.find((x) => x.id === id);
+    if (s) { openedRef.current = true; setSelectedSale(s); setDetailTab('overview'); }
+  }, [sales]);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Sale>>({});
   const [showVoidConfirm, setShowVoidConfirm] = useState(false);
@@ -102,15 +116,41 @@ export default function SalesPage() {
   const availableInventory = useMemo(() => inventory.filter((i) => i.location === selectedHub), [inventory, selectedHub]);
   const selectedInventoryItem = useMemo(() => inventory.find((i) => i.id === selectedProductId), [inventory, selectedProductId]);
 
+  // ── Cart lines (resolved) & totals ──
+  const cartLines = useMemo(() => lineItems.map((li) => {
+    const item = inventory.find((i) => i.id === li.itemId);
+    const lineTotal = li.unitPrice * li.quantity;
+    const unitCost = item?.avgUnitCost ?? 0;
+    return { ...li, item, name: item?.name || 'Unknown', uom: item?.unitOfMeasure || 'unit', sku: item?.sku, unitCost, lineTotal, profit: (li.unitPrice - unitCost) * li.quantity };
+  }), [lineItems, inventory]);
+  const cartTotal = useMemo(() => cartLines.reduce((a, l) => a + l.lineTotal, 0), [cartLines]);
+  const cartProfit = useMemo(() => cartLines.reduce((a, l) => a + l.profit, 0), [cartLines]);
+
   const validationErrors = useMemo(() => {
     const errors: Record<string, string> = {};
     if (!newSale.customerId) errors.customerId = 'Customer is required.';
-    if (!selectedProductId) errors.productId = 'Product is required.';
-    if (quantity <= 0) errors.quantity = 'Quantity must be greater than 0.';
-    if (selectedInventoryItem && quantity > selectedInventoryItem.currentStock) errors.quantity = `Exceeds stock (${selectedInventoryItem.currentStock}).`;
+    if (lineItems.length === 0) errors.items = 'Add at least one product.';
     return errors;
-  }, [newSale.customerId, selectedProductId, quantity, selectedInventoryItem]);
+  }, [newSale.customerId, lineItems]);
   const isFormValid = Object.keys(validationErrors).length === 0;
+
+  // Draft add-line validation (stock aware, accounts for what's already in the cart)
+  const draftStockLeft = useMemo(() => {
+    if (!selectedInventoryItem) return 0;
+    const inCart = lineItems.filter((l) => l.itemId === selectedInventoryItem.id).reduce((a, l) => a + l.quantity, 0);
+    return selectedInventoryItem.currentStock - inCart;
+  }, [selectedInventoryItem, lineItems]);
+  const canAddLine = !!selectedInventoryItem && quantity > 0 && quantity <= draftStockLeft;
+
+  const addLine = () => {
+    if (!selectedInventoryItem) { toast.error('Select a product.'); return; }
+    if (quantity <= 0) { toast.error('Quantity must be greater than 0.'); return; }
+    if (quantity > draftStockLeft) { toast.error(`Only ${draftStockLeft} ${selectedInventoryItem.unitOfMeasure} left after cart.`); return; }
+    const price = draftPrice > 0 ? draftPrice : selectedInventoryItem.baseSellingPrice;
+    setLineItems((prev) => [...prev, { itemId: selectedInventoryItem.id, quantity, unitPrice: price }]);
+    setSelectedProductId(''); setQuantity(1); setDraftPrice(0);
+  };
+  const removeLine = (idx: number) => setLineItems((prev) => prev.filter((_, i) => i !== idx));
 
   const customerCreditWarning = useMemo(() => {
     if (!newSale.customerId) return null;
@@ -194,39 +234,45 @@ export default function SalesPage() {
   // ── Record sale handlers ──
   const handleProductChange = (productId: string) => {
     setSelectedProductId(productId);
-    setTouched((t) => ({ ...t, productId: true }));
     const item = inventory.find((i) => i.id === productId);
-    if (item) setNewSale((prev) => ({ ...prev, amount: item.baseSellingPrice * quantity, productDetails: `${quantity} ${item.unitOfMeasure} of ${item.name}` }));
+    setDraftPrice(item ? item.baseSellingPrice : 0);
+    setQuantity(1);
   };
 
-  const handleQuantityChange = (qty: number) => {
-    setQuantity(qty);
-    setTouched((t) => ({ ...t, quantity: true }));
-    const item = inventory.find((i) => i.id === selectedProductId);
-    if (item) setNewSale((prev) => ({ ...prev, amount: item.baseSellingPrice * qty, productDetails: `${qty} ${item.unitOfMeasure} of ${item.name}` }));
-  };
+  const handleQuantityChange = (qty: number) => setQuantity(qty);
 
   const handleSaveSale = () => {
-    setTouched({ customerId: true, productId: true, quantity: true });
-    if (!isFormValid) { toast.error('Please fix validation errors.'); return; }
+    setTouched({ customerId: true, items: true });
+    if (!newSale.customerId) { toast.error('Select a customer.'); return; }
+    if (lineItems.length === 0) { toast.error('Add at least one product.'); return; }
 
     const customer = customers.find((c) => c.id === newSale.customerId);
     const agent = agents.find((a) => a.id === (newSale.agentId || user?.id));
-    const inventoryItem = inventory.find((i) => i.id === selectedProductId);
-    if (!inventoryItem || inventoryItem.currentStock < quantity) { toast.error(`Insufficient stock in ${selectedHub}.`); return; }
 
-    const amount = Number(newSale.amount);
-    const profitMargin = Number(newSale.profitMargin) || 0;
-    const profitAmount = (amount * profitMargin) / 100;
+    // Aggregate quantity per product for stock validation & decrement
+    const qtyByItem: Record<string, number> = {};
+    lineItems.forEach((l) => { qtyByItem[l.itemId] = (qtyByItem[l.itemId] || 0) + l.quantity; });
+    for (const [itemId, qty] of Object.entries(qtyByItem)) {
+      const inv = inventory.find((i) => i.id === itemId);
+      if (!inv || inv.currentStock < qty) { toast.error(`Insufficient stock for ${inv?.name || 'item'} in ${selectedHub}.`); return; }
+    }
+
+    const items: SaleItem[] = cartLines.map((l) => ({
+      itemId: l.itemId, itemName: l.name, sku: l.sku, quantity: l.quantity, uom: l.uom,
+      unitPrice: l.unitPrice, unitCost: l.unitCost, lineTotal: l.lineTotal, profit: l.profit,
+    }));
+    const amount = cartTotal;
+    const profitAmount = cartProfit;
+    const profitMargin = amount > 0 ? Math.round((profitAmount / amount) * 100) : 0;
     const saleDate = newSale.date || new Date().toISOString().split('T')[0];
-
+    const summary = items.map((i) => `${i.quantity} ${i.uom} ${i.itemName}`).join(', ');
     const finalAmountPaid = paymentMode === PaymentMode.FULL_PAYMENT ? amount : paymentMode === PaymentMode.FULL_CREDIT ? 0 : amountPaid;
 
     const sale: Sale = {
       id: StorageService.generateId(), customerId: newSale.customerId!, customerName: customer?.name || 'Unknown',
-      amount, profitMargin, profitAmount, date: saleDate,
+      items, amount, profitMargin, profitAmount, date: saleDate,
       agentId: agent?.id || user?.id || 'unknown', agentName: agent?.name || user?.name || 'Unknown',
-      status: newSale.status as Sale['status'], productDetails: `[${selectedHub}] ${newSale.productDetails}`, isCredit,
+      status: newSale.status as Sale['status'], productDetails: `[${selectedHub}] ${summary}`, isCredit,
       paymentTerms: newSale.paymentTerms, notes: newSale.notes || undefined,
       channel: newSale.channel || SalesChannel.WALK_IN,
       deliveryStatus: newSale.deliveryStatus || DeliveryStatus.NOT_APPLICABLE,
@@ -235,13 +281,13 @@ export default function SalesPage() {
       paymentMode, amountPaid: finalAmountPaid,
     };
 
-    const updatedInventory = inventory.map((i) => i.id === selectedProductId ? { ...i, currentStock: i.currentStock - quantity, lastStockUpdate: saleDate } : i);
-    const stockLog: StockLog = {
-      id: StorageService.generateId(), date: saleDate, itemId: inventoryItem.id, itemName: inventoryItem.name,
-      type: StockMovementType.SALE, quantity: -Math.abs(quantity), uom: inventoryItem.unitOfMeasure,
-      unitCost: inventoryItem.avgUnitCost, unitPrice: amount / quantity, referenceId: sale.id,
+    const updatedInventory = inventory.map((i) => qtyByItem[i.id] ? { ...i, currentStock: i.currentStock - qtyByItem[i.id], lastStockUpdate: saleDate } : i);
+    const newStockLogs: StockLog[] = cartLines.map((l) => ({
+      id: StorageService.generateId(), date: saleDate, itemId: l.itemId, itemName: l.name,
+      type: StockMovementType.SALE, quantity: -Math.abs(l.quantity), uom: l.uom,
+      unitCost: l.unitCost, unitPrice: l.unitPrice, referenceId: sale.id,
       agentId: user?.id || 'admin', notes: `Sale to ${customer?.name}${isCredit ? ' (CREDIT)' : ''}`,
-    };
+    }));
     const updatedCustomers = customers.map((c) => c.id === sale.customerId ? { ...c, totalOrders: c.totalOrders + 1, totalSpent: c.totalSpent + amount } : c);
 
     if (isCredit) {
@@ -255,10 +301,10 @@ export default function SalesPage() {
 
     saveSales.mutate([sale, ...sales]);
     saveInventory.mutate(updatedInventory);
-    saveStockLogs.mutate([stockLog, ...stockLogs]);
+    saveStockLogs.mutate([...newStockLogs, ...stockLogs]);
     saveCustomers.mutate(updatedCustomers);
 
-    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'SALE_STOCK_OUT', entityType: 'Sale', entityId: sale.id, details: `Sold ${quantity} ${inventoryItem.unitOfMeasure} of ${inventoryItem.name} to ${customer?.name}`, location: selectedHub });
+    StorageService.addAuditLog({ userId: user?.id || 'admin', userName: user?.name || 'Admin', action: 'SALE_STOCK_OUT', entityType: 'Sale', entityId: sale.id, details: `Sold ${items.length} item${items.length !== 1 ? 's' : ''} (${summary}) to ${customer?.name}`, location: selectedHub });
     setShowAddModal(false);
     resetForm();
     toast.success('Sale recorded.');
@@ -266,7 +312,7 @@ export default function SalesPage() {
 
   const resetForm = () => {
     setNewSale({ amount: 0, profitMargin: 0, status: 'Pending', date: new Date().toISOString().split('T')[0], paymentTerms: PaymentTerms.COD, notes: '', channel: SalesChannel.WALK_IN, deliveryStatus: DeliveryStatus.NOT_APPLICABLE });
-    setSelectedProductId(''); setQuantity(1); setIsCredit(false); setPaymentMode(PaymentMode.FULL_PAYMENT); setPaymentType(PaymentType.CASH); setAmountPaid(0); setTouched({});
+    setSelectedProductId(''); setQuantity(1); setDraftPrice(0); setLineItems([]); setIsCredit(false); setPaymentMode(PaymentMode.FULL_PAYMENT); setPaymentType(PaymentType.CASH); setAmountPaid(0); setTouched({});
   };
 
   // ── Status & delivery updates ──
@@ -631,6 +677,28 @@ export default function SalesPage() {
               {/* ── OVERVIEW TAB ── */}
               {detailTab === 'overview' && (
                 <>
+                  {/* Clickable customer → profile in Customers module */}
+                  {(() => {
+                    const cust = customers.find((c) => c.id === selectedSale.customerId);
+                    const segs = cust ? deriveSegments(cust) : [];
+                    const topSeg = segs.find((s) => !['B2B Account', 'B2C Consumer'].includes(s));
+                    return (
+                      <div onClick={() => { if (cust) router.push(`/customers?open=${cust.id}`); }} className={`flex items-center justify-between p-3 rounded-md border ${cust ? 'cursor-pointer hover:border-primary/40 hover:bg-muted/30 group' : ''}`}>
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold border border-primary/20 shrink-0">{selectedSale.customerName.charAt(0).toUpperCase()}</div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5"><span className="font-medium truncate group-hover:text-primary">{selectedSale.customerName}</span>{cust && <ArrowUpRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />}</div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {cust?.type && <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold ${cust.type === 'B2B' ? 'bg-blue-100 text-blue-700' : 'bg-primary/10 text-primary'}`}>{cust.type}</span>}
+                              {topSeg && <span className="text-[10px] text-muted-foreground truncate">{topSeg}</span>}
+                            </div>
+                          </div>
+                        </div>
+                        {cust && <span className="text-xs text-muted-foreground shrink-0">View profile →</span>}
+                      </div>
+                    );
+                  })()}
+
                   {/* Financial summary */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 rounded-md border bg-muted/20">
@@ -667,14 +735,59 @@ export default function SalesPage() {
                     )}
                   </div>
 
-                  {/* Product details (full, untruncated) */}
-                  <div className="p-4 rounded-md border bg-muted/10">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Package size={14} className="text-primary" />
-                      <span className="text-sm font-medium">Product Details</span>
-                    </div>
-                    <p className="text-sm">{selectedSale.productDetails || 'No details'}</p>
+                  {/* Profit & balance */}
+                  <div className="flex items-center gap-5 text-sm flex-wrap">
+                    <div className="flex items-center gap-1.5"><TrendingUp size={14} className="text-green-600" /><span className="text-muted-foreground">Profit:</span><span className="font-bold text-green-700">{fmt(selectedSale.profitAmount)}</span><span className="text-xs text-muted-foreground">({selectedSale.profitMargin}%)</span></div>
+                    {selectedSale.amountPaid !== undefined && selectedSale.amountPaid < selectedSale.amount && (
+                      <div className="flex items-center gap-1.5"><AlertTriangle size={14} className="text-orange-500" /><span className="text-muted-foreground">Balance:</span><span className="font-bold text-orange-600">{fmt(selectedSale.amount - selectedSale.amountPaid)}</span></div>
+                    )}
                   </div>
+
+                  {/* Itemized line items (or legacy product-details fallback) */}
+                  {selectedSale.items && selectedSale.items.length > 0 ? (
+                    <div>
+                      <h4 className="text-sm font-medium mb-2 flex items-center gap-2"><Boxes size={14} className="text-primary" /> Items ({selectedSale.items.length})</h4>
+                      <div className="rounded-md border overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                              <th className="text-left px-3 py-2 font-semibold">Product</th>
+                              <th className="text-right px-3 py-2 font-semibold">Qty</th>
+                              <th className="text-right px-3 py-2 font-semibold">Unit</th>
+                              <th className="text-right px-3 py-2 font-semibold">Total</th>
+                              <th className="text-right px-3 py-2 font-semibold">Profit</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedSale.items.map((it, i) => (
+                              <tr key={i} className="border-b last:border-0">
+                                <td className="px-3 py-2"><span className="font-medium">{it.itemName}</span>{it.sku && <span className="block text-[10px] text-muted-foreground">{it.sku}</span>}</td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap">{it.quantity} {it.uom}</td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap">{fmt(it.unitPrice)}</td>
+                                <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{fmt(it.lineTotal)}</td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap text-green-700">{fmt(it.profit)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-muted/20 border-t-2 border-dashed">
+                              <td className="px-3 py-2 font-medium text-muted-foreground" colSpan={3}>{selectedSale.items.length} item{selectedSale.items.length !== 1 ? 's' : ''}</td>
+                              <td className="px-3 py-2 text-right font-black whitespace-nowrap">{fmt(selectedSale.amount)}</td>
+                              <td className="px-3 py-2 text-right font-bold text-green-700 whitespace-nowrap">{fmt(selectedSale.profitAmount)}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-md border bg-muted/10">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Package size={14} className="text-primary" />
+                        <span className="text-sm font-medium">Product Details</span>
+                      </div>
+                      <p className="text-sm">{selectedSale.productDetails || 'No details'}</p>
+                    </div>
+                  )}
 
                   {/* Sale metadata grid */}
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -974,47 +1087,58 @@ export default function SalesPage() {
                 </div>
               )}
 
-              {/* Product */}
+              {/* Products (multi-line cart) */}
               <div className="space-y-2">
-                <label className={labelCls}>Product *</label>
-                <select value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={`${inputCls} ${touched.productId && validationErrors.productId ? 'border-red-500' : ''}`}>
-                  <option value="">-- Select Product --</option>{availableInventory.map((i) => <option key={i.id} value={i.id}>{i.name} (Stock: {i.currentStock} {i.unitOfMeasure})</option>)}
-                </select>
-                {touched.productId && validationErrors.productId && <p className="text-xs text-red-500">{validationErrors.productId}</p>}
+                <label className={labelCls}>Products *</label>
+                {/* Add-line row */}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <span className="text-[11px] text-muted-foreground">Product</span>
+                    <select value={selectedProductId} onChange={(e) => handleProductChange(e.target.value)} className={inputCls}>
+                      <option value="">-- Select --</option>
+                      {availableInventory.map((i) => <option key={i.id} value={i.id} disabled={i.currentStock <= 0}>{i.name} ({i.currentStock} {i.unitOfMeasure})</option>)}
+                    </select>
+                  </div>
+                  <div className="w-16 space-y-1">
+                    <span className="text-[11px] text-muted-foreground">Qty</span>
+                    <input type="number" min={1} value={quantity} onChange={(e) => handleQuantityChange(parseInt(e.target.value) || 0)} className={inputCls} />
+                  </div>
+                  <div className="w-24 space-y-1">
+                    <span className="text-[11px] text-muted-foreground">Unit {NAIRA}</span>
+                    <input type="number" min={0} value={draftPrice || ''} onChange={(e) => setDraftPrice(parseInt(e.target.value) || 0)} className={inputCls} />
+                  </div>
+                  <button type="button" onClick={addLine} disabled={!canAddLine} className={`${btnSecondary} shrink-0 disabled:opacity-50 disabled:pointer-events-none`}><Plus size={14} /> Add</button>
+                </div>
                 {selectedInventoryItem && (
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className={`font-medium ${selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel ? 'text-red-600' : 'text-green-600'}`}>
-                      {selectedInventoryItem.currentStock} {selectedInventoryItem.unitOfMeasure} in stock
-                    </span>
-                    <span>&middot; {fmt(selectedInventoryItem.baseSellingPrice)}/{selectedInventoryItem.unitOfMeasure}</span>
-                    {selectedInventoryItem.currentStock <= selectedInventoryItem.minStockLevel && (
-                      <span className="text-red-500 font-medium flex items-center gap-1"><AlertTriangle size={10} /> Low stock</span>
-                    )}
+                  <p className={`text-[11px] ${quantity > draftStockLeft ? 'text-red-500 font-medium' : 'text-muted-foreground'}`}>
+                    {draftStockLeft} {selectedInventoryItem.unitOfMeasure} available{quantity > draftStockLeft ? ' — exceeds remaining stock' : ''}
+                  </p>
+                )}
+
+                {/* Cart list */}
+                {cartLines.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-muted-foreground border border-dashed rounded-md">No products added yet — add one or more above.</div>
+                ) : (
+                  <div className="rounded-md border divide-y">
+                    {cartLines.map((l, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2.5 text-sm">
+                        <Package size={14} className="text-muted-foreground shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{l.name}</p>
+                          <p className="text-[11px] text-muted-foreground">{l.quantity} {l.uom} &times; {fmt(l.unitPrice)}</p>
+                        </div>
+                        <span className="font-semibold shrink-0">{fmt(l.lineTotal)}</span>
+                        <button type="button" onClick={() => removeLine(idx)} className="text-muted-foreground hover:text-red-600 p-1 shrink-0"><Trash2 size={14} /></button>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between p-2.5 bg-muted/30">
+                      <span className="text-sm font-medium">{cartLines.length} item{cartLines.length !== 1 ? 's' : ''} · Total</span>
+                      <span className="text-base font-black">{fmt(cartTotal)}</span>
+                    </div>
                   </div>
                 )}
+                {touched.items && validationErrors.items && <p className="text-xs text-red-500">{validationErrors.items}</p>}
               </div>
-
-              {/* Quantity & Amount */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className={labelCls}>Quantity</label>
-                  <input type="number" min={1} max={selectedInventoryItem?.currentStock || undefined} value={quantity} onChange={(e) => handleQuantityChange(parseInt(e.target.value) || 0)} className={`${inputCls} ${touched.quantity && validationErrors.quantity ? 'border-red-500' : ''}`} />
-                  {touched.quantity && validationErrors.quantity && <p className="text-xs text-red-500">{validationErrors.quantity}</p>}
-                </div>
-                <div className="space-y-2">
-                  <label className={labelCls}>Amount ({NAIRA})</label>
-                  <input type="number" value={newSale.amount || ''} onChange={(e) => setNewSale({ ...newSale, amount: parseInt(e.target.value) || 0 })} className={inputCls} />
-                </div>
-              </div>
-              {/* Live price breakdown */}
-              {selectedInventoryItem && quantity > 0 && (
-                <div className="text-xs text-muted-foreground bg-muted/30 rounded-md px-3 py-2 flex items-center gap-3 flex-wrap">
-                  <span>{quantity} &times; {fmt(selectedInventoryItem.baseSellingPrice)} = <span className="font-medium text-foreground">{fmt(selectedInventoryItem.baseSellingPrice * quantity)}</span></span>
-                  {Number(newSale.amount) !== selectedInventoryItem.baseSellingPrice * quantity && (
-                    <span className="text-orange-600 font-medium">Custom price applied ({fmt(Number(newSale.amount))})</span>
-                  )}
-                </div>
-              )}
 
               {/* Payment Mode */}
               <div className="space-y-2">
@@ -1023,7 +1147,7 @@ export default function SalesPage() {
                   {Object.values(PaymentMode).map((mode) => (
                     <button key={mode} type="button" onClick={() => {
                       setPaymentMode(mode);
-                      if (mode === PaymentMode.FULL_PAYMENT) { setAmountPaid(Number(newSale.amount) || 0); setIsCredit(false); }
+                      if (mode === PaymentMode.FULL_PAYMENT) { setAmountPaid(cartTotal || 0); setIsCredit(false); }
                       else if (mode === PaymentMode.FULL_CREDIT) { setAmountPaid(0); setIsCredit(true); }
                       else { setIsCredit(true); }
                     }} className={`flex-1 py-2 px-3 rounded-md text-xs font-medium border transition-colors ${paymentMode === mode ? 'bg-primary text-primary-foreground border-primary' : 'bg-background text-muted-foreground hover:text-foreground hover:border-foreground/30'}`}>
@@ -1037,9 +1161,9 @@ export default function SalesPage() {
               {paymentMode === PaymentMode.PARTIAL_CREDIT && (
                 <div className="space-y-2">
                   <label className={labelCls}>Amount Paid Now ({NAIRA})</label>
-                  <input type="number" min={0} max={Number(newSale.amount) || undefined} value={amountPaid} onChange={(e) => setAmountPaid(parseInt(e.target.value) || 0)} className={inputCls} />
-                  {Number(newSale.amount) > 0 && (
-                    <p className="text-xs text-orange-600 font-medium">Balance on credit: {fmt(Math.max(0, Number(newSale.amount) - amountPaid))}</p>
+                  <input type="number" min={0} max={cartTotal || undefined} value={amountPaid} onChange={(e) => setAmountPaid(parseInt(e.target.value) || 0)} className={inputCls} />
+                  {cartTotal > 0 && (
+                    <p className="text-xs text-orange-600 font-medium">Balance on credit: {fmt(Math.max(0, cartTotal - amountPaid))}</p>
                   )}
                 </div>
               )}

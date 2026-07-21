@@ -8,6 +8,7 @@ import {
   useCompensations, useSaveCompensations, useCustomers,
 } from '@/hooks/use-queries';
 import { StorageService } from '@/lib/storage-service';
+import { deriveSegments } from '@/lib/segmentation';
 import {
   Feedback, FeedbackType, FeedbackPriority, Sentiment,
   Enquiry, EnquiryCategory,
@@ -137,7 +138,8 @@ export default function InteractionsPage() {
     const segCounts: Record<string, number> = {};
     feedbacks.filter((f) => f.type === FeedbackType.COMPLAINT).forEach((f) => {
       const customer = customers.find((c) => c.id === f.customerId || c.name === f.customerName);
-      if (customer?.segments?.length) customer.segments.forEach((seg) => { segCounts[seg] = (segCounts[seg] || 0) + 1; });
+      const segs = customer ? deriveSegments(customer) : [];
+      if (segs.length) segs.forEach((seg) => { segCounts[seg] = (segCounts[seg] || 0) + 1; });
       else segCounts['Unassigned'] = (segCounts['Unassigned'] || 0) + 1;
     });
     return Object.entries(segCounts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);

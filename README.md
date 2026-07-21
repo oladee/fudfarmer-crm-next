@@ -1,5 +1,7 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+> **Engineers:** the `Update-v2` branch adds the Suppliers module, the Insight Explorer (Ask / Explore / Simulate / Compare), auto customer segmentation, and per-card AI insights. **Read [`docs/UPDATE-V2.md`](docs/UPDATE-V2.md) before working on any of it** — it explains every new feature, the data model, conventions, and how to extend them. Dev server runs on **port 3456** for this build.
+
 ## Getting Started
 
 First, run the development server:

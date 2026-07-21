@@ -5,7 +5,7 @@ import { StorageService } from '../lib/storage-service';
 import {
   Customer, Sale, Feedback, Compensation,
   Enquiry, Agent, Task, InventoryItem, StockLog,
-  CreditRecord, AuditLog, Hub,
+  CreditRecord, AuditLog, Hub, Supplier, SupplierIssue,
 } from '../types';
 
 // --- Hubs ---
@@ -144,4 +144,28 @@ export function useSaveCredits() {
 // --- Audit Logs ---
 export function useAuditLogs() {
   return useQuery({ queryKey: ['auditLogs'], queryFn: () => StorageService.getAuditLogs() });
+}
+
+// --- Suppliers ---
+export function useSuppliers() {
+  return useQuery({ queryKey: ['suppliers'], queryFn: () => StorageService.getSuppliers() });
+}
+export function useSaveSuppliers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: Supplier[]) => { StorageService.saveSuppliers(items); return items; },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['suppliers'] }),
+  });
+}
+
+// --- Supplier Issues ---
+export function useSupplierIssues() {
+  return useQuery({ queryKey: ['supplierIssues'], queryFn: () => StorageService.getSupplierIssues() });
+}
+export function useSaveSupplierIssues() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: SupplierIssue[]) => { StorageService.saveSupplierIssues(items); return items; },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['supplierIssues'] }),
+  });
 }
