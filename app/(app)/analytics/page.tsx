@@ -75,12 +75,22 @@ export default function AnalyticsPage() {
         <p className="text-sm text-muted-foreground">Deeper insights into FudFarmer operations</p>
       </div>
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <HubScopeFilterBar scope={hubScope} />
-        <MetricsPeriodBar
-          period={metricsPeriod}
-          hint="Sales use sale date; customers use createdAt; credits use issue date; feedback & stock moves use their event dates. Product stock levels are a current snapshot."
-        />
+      <div className="space-y-4 rounded-xl border bg-card p-4 shadow-sm">
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            Location
+          </p>
+          <HubScopeFilterBar scope={hubScope} />
+        </div>
+        <div className="space-y-2 border-t pt-4">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            Reporting period
+          </p>
+          <MetricsPeriodBar
+            period={metricsPeriod}
+            hint="Sales use sale date; customers use createdAt; credits use issue date; feedback & stock moves use their event dates. Product stock levels are a current snapshot."
+          />
+        </div>
       </div>
 
       {!HAS_API ? (

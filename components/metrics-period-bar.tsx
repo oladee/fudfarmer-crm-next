@@ -122,9 +122,12 @@ export function MetricsPeriodBar({ period, className = '', hint }: MetricsPeriod
     : PRESETS.find((p) => p.key === period.preset)?.label ?? period.preset;
 
   return (
-    <div className={`flex flex-col gap-2 ${className}`.trim()}>
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="flex items-center gap-1 bg-muted/40 p-1 rounded-lg border overflow-x-auto">
+    <div className={`flex flex-col gap-3 ${className}`.trim()}>
+      <div className="flex flex-col items-start gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+          Preset
+        </span>
+        <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-muted/40 p-1">
           {PRESETS.map((p) => {
             const active = !period.isCustom && period.preset === p.key;
             return (
@@ -143,6 +146,11 @@ export function MetricsPeriodBar({ period, className = '', hint }: MetricsPeriod
             );
           })}
         </div>
+      </div>
+      <div className="flex flex-col items-start gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+          Custom range
+        </span>
         <div className="flex items-center gap-2 flex-wrap">
           <input
             type="date"
