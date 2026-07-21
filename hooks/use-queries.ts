@@ -642,6 +642,28 @@ export function useResetPassword() {
   });
 }
 
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: async (dto: { email: string }) => {
+      requireApi('Password recovery');
+      return axiosPost('auth/forgot-password', dto) as Promise<{
+        message: string;
+      }>;
+    },
+  });
+}
+
+export function useCompletePasswordReset() {
+  return useMutation({
+    mutationFn: async (dto: { token: string; newPassword: string }) => {
+      requireApi('Password reset');
+      return axiosPost('auth/reset-password/confirm', dto) as Promise<{
+        message: string;
+      }>;
+    },
+  });
+}
+
 export function useUpdateProfile() {
   const qc = useQueryClient();
   return useMutation({

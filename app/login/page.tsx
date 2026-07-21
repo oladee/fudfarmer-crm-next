@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { Leaf, Loader2 } from 'lucide-react';
 import { SubmitButton } from '@/components/submit-button';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const { login, isAuthenticated, loading } = useAuth();
@@ -67,7 +68,15 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[13px] font-medium text-foreground/80">Password</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[13px] font-medium text-foreground/80">Password</label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 type="password"
                 value={password}
