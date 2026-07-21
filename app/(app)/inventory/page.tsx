@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useHubScopeFilter } from '@/hooks/use-hub-scope';
 import { HubScopeFilterBar } from '@/components/hub-scope-filter';
@@ -30,9 +30,11 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
+import { PaginationControls } from '@/components/ui/pagination-controls';
 
 type ProductCategory = InventoryItem['category'];
 const ALL_UOMS: InventoryItem['unitOfMeasure'][] = ['Cartons', 'Units', 'Kg', 'Liters'];
+const INVENTORY_PAGE_SIZE = 20;
 
 /* ────────────────── FIFO / FEFO helpers ────────────────── */
 
@@ -201,6 +203,7 @@ export default function InventoryPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
   const [filterCategory, setFilterCategory] = useState<ProductCategory | 'All'>('All');
+  const [inventoryPage, setInventoryPage] = useState(1);
 
   // Selection / batch
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -279,6 +282,20 @@ export default function InventoryPage() {
     const matchesActive = i.isActive !== false;
     return matchesSearch && matchesLowStock && matchesHub && matchesCategory && matchesActive;
   }), [items, searchTerm, filterLowStock, hubScope, filterCategory]);
+
+  const inventoryTotalPages = Math.max(
+    1,
+    Math.ceil(filteredItems.length / INVENTORY_PAGE_SIZE),
+  );
+  const currentInventoryPage = Math.min(inventoryPage, inventoryTotalPages);
+  const paginatedItems = useMemo(() => {
+    const start = (currentInventoryPage - 1) * INVENTORY_PAGE_SIZE;
+    return filteredItems.slice(start, start + INVENTORY_PAGE_SIZE);
+  }, [filteredItems, currentInventoryPage]);
+
+  useEffect(() => {
+    setInventoryPage(1);
+  }, [searchTerm, filterLowStock, filterCategory, hubScope.filterHub]);
 
   const inventoryValue = useMemo(() => filteredItems.reduce((acc, curr) => acc + curr.currentStock * curr.avgUnitCost, 0), [filteredItems]);
   const retailValue = useMemo(() => filteredItems.reduce((acc, curr) => acc + curr.currentStock * curr.baseSellingPrice, 0), [filteredItems]);
@@ -385,7 +402,15 @@ export default function InventoryPage() {
   };
 
   const handleSelectAll = () => {
-    setSelectedIds(selectedIds.size === filteredItems.length ? new Set() : new Set(filteredItems.map((i) => i.id)));
+    const pageIds = paginatedItems.map((item) => item.id);
+    const allPageSelected =
+      pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+    const next = new Set(selectedIds);
+    pageIds.forEach((id) => {
+      if (allPageSelected) next.delete(id);
+      else next.add(id);
+    });
+    setSelectedIds(next);
   };
 
   const openEditModal = useCallback((item: InventoryItem) => {
@@ -788,9 +813,19 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <HubScopeFilterBar scope={hubScope} />
-        <MetricsPeriodBar period={metricsPeriod} />
+      <div className="space-y-4 rounded-xl border bg-card p-4 shadow-sm">
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            Location
+          </p>
+          <HubScopeFilterBar scope={hubScope} />
+        </div>
+        <div className="space-y-2 border-t pt-4">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+            Reporting period
+          </p>
+          <MetricsPeriodBar period={metricsPeriod} />
+        </div>
       </div>
 
       {/* ── Alerts ── */}
@@ -904,29 +939,60 @@ export default function InventoryPage() {
       ) : activeView === 'Products' ? (
         <div className="space-y-5">
           {/* Search & actions bar */}
-          <div className="flex flex-col sm:flex-row gap-3 items-center bg-card p-4 rounded-lg border shadow-sm">
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search SKU or product..."
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-2 border rounded-md px-3 py-2 bg-background">
-                <Filter size={14} className="text-muted-foreground" />
-                <select
-                  value={filterCategory}
-                  onChange={(e) => setFilterCategory(e.target.value as ProductCategory | 'All')}
-                  className="bg-transparent border-none text-sm font-medium focus:outline-none"
-                >
-                  <option value="All">All Categories</option>
-                  {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+          <div className="space-y-4 rounded-xl border bg-card p-4 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+              Filter products
+            </p>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_220px_auto]">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="inventory-search">
+                  Search
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <input
+                    id="inventory-search"
+                    type="text"
+                    placeholder="Search SKU or product..."
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pl-9 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
               </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="inventory-category">
+                  Category
+                </label>
+                <div className="flex h-10 items-center gap-2 rounded-md border bg-background px-3">
+                  <Filter size={14} className="text-muted-foreground" />
+                  <select
+                    id="inventory-category"
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value as ProductCategory | 'All')}
+                    className="min-w-0 flex-1 bg-transparent text-sm font-medium focus:outline-none"
+                  >
+                    <option value="All">All Categories</option>
+                    {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-end gap-2 md:col-span-2 xl:col-span-1 xl:justify-end">
+                <button
+                  type="button"
+                  onClick={() => setFilterLowStock(!filterLowStock)}
+                  className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${
+                    filterLowStock
+                      ? 'border-orange-300 bg-orange-50 text-orange-700'
+                      : 'border-input bg-background hover:bg-accent'
+                  }`}
+                >
+                  <AlertTriangle size={14} />
+                  {filterLowStock ? 'Low stock only' : 'All stock levels'}
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3">
               <input type="file" accept=".xlsx" ref={importInputRef} className="hidden" onChange={handleInventoryImportFile} />
               {can('inventory.import') && (
                 <>
@@ -962,7 +1028,15 @@ export default function InventoryPage() {
                   <tr className="border-b hover:bg-muted/50">
                     {isSelectionMode && (
                       <th className="h-12 px-4 w-10">
-                        <input type="checkbox" className="w-4 h-4 accent-primary" checked={selectedIds.size === filteredItems.length && filteredItems.length > 0} onChange={handleSelectAll} />
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 accent-primary"
+                          checked={
+                            paginatedItems.length > 0 &&
+                            paginatedItems.every((item) => selectedIds.has(item.id))
+                          }
+                          onChange={handleSelectAll}
+                        />
                       </th>
                     )}
                     <th className="h-12 px-4 text-left font-medium text-muted-foreground">SKU &amp; Product</th>
@@ -976,7 +1050,7 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filteredItems.map((item) => {
+                  {paginatedItems.map((item) => {
                     const isLow = item.currentStock <= item.minStockLevel;
                     const isSelected = selectedIds.has(item.id);
                     const status = getStockStatus(item);
@@ -1077,6 +1151,18 @@ export default function InventoryPage() {
                 </tbody>
               </table>
             </div>
+            <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                {filteredItems.length === 0
+                  ? 'No products to show'
+                  : `Showing ${(currentInventoryPage - 1) * INVENTORY_PAGE_SIZE + 1}–${Math.min(currentInventoryPage * INVENTORY_PAGE_SIZE, filteredItems.length)} of ${filteredItems.length}`}
+              </p>
+              <PaginationControls
+                page={currentInventoryPage}
+                totalPages={inventoryTotalPages}
+                onPageChange={setInventoryPage}
+              />
+            </div>
           </div>
         </div>
       ) : (
@@ -1110,43 +1196,78 @@ export default function InventoryPage() {
           </div>
 
           {/* Ledger Filters */}
-          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 bg-card p-3 rounded-md border">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search product, notes, batch..."
-                className="pl-10 h-10 w-full rounded-md border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                value={ledgerSearch}
-                onChange={(e) => setLedgerSearch(e.target.value)}
-              />
+          <div className="space-y-4 rounded-xl border bg-card p-4 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+              Filter ledger
+            </p>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="ledger-search">
+                  Search
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    id="ledger-search"
+                    type="text"
+                    placeholder="Product, notes, batch..."
+                    className="h-10 w-full rounded-md border border-input bg-background pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={ledgerSearch}
+                    onChange={(e) => setLedgerSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="ledger-type">
+                  Movement type
+                </label>
+                <select
+                  id="ledger-type"
+                  value={ledgerTypeFilter}
+                  onChange={(e) => setLedgerTypeFilter(e.target.value as StockMovementType | 'All')}
+                  className="h-10 w-full rounded-md border bg-background px-3 text-sm font-medium"
+                >
+                  <option value="All">All Types</option>
+                  {Object.values(StockMovementType).map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="ledger-date-from">
+                  From
+                </label>
+                <input
+                  id="ledger-date-from"
+                  type="date"
+                  value={ledgerDateFrom}
+                  max={ledgerDateTo || undefined}
+                  onChange={(e) => setLedgerDateFrom(e.target.value)}
+                  className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="ledger-date-to">
+                  To
+                </label>
+                <input
+                  id="ledger-date-to"
+                  type="date"
+                  value={ledgerDateTo}
+                  min={ledgerDateFrom || undefined}
+                  onChange={(e) => setLedgerDateTo(e.target.value)}
+                  className="h-10 w-full rounded-md border bg-background px-2 text-sm"
+                />
+              </div>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <label className="text-xs font-medium text-muted-foreground">From</label>
-                <input type="date" value={ledgerDateFrom} onChange={(e) => setLedgerDateFrom(e.target.value)} className="h-10 px-2 rounded-lg border text-sm bg-background" />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <label className="text-xs font-medium text-muted-foreground">To</label>
-                <input type="date" value={ledgerDateTo} onChange={(e) => setLedgerDateTo(e.target.value)} className="h-10 px-2 rounded-lg border text-sm bg-background" />
-              </div>
-              <select
-                value={ledgerTypeFilter}
-                onChange={(e) => setLedgerTypeFilter(e.target.value as StockMovementType | 'All')}
-                className="h-10 px-3 rounded-lg border text-sm font-medium bg-background"
-              >
-                <option value="All">All Types</option>
-                {Object.values(StockMovementType).map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              {(ledgerDateFrom || ledgerDateTo || ledgerTypeFilter !== 'All' || ledgerSearch) && (
+            {(ledgerDateFrom || ledgerDateTo || ledgerTypeFilter !== 'All' || ledgerSearch) && (
+              <div className="border-t pt-3">
                 <button
                   onClick={() => { setLedgerDateFrom(''); setLedgerDateTo(''); setLedgerTypeFilter('All'); setLedgerSearch(''); }}
-                  className="h-10 px-3 rounded-md border text-sm font-medium text-muted-foreground hover:bg-accent"
+                  className="h-9 rounded-md border px-3 text-sm font-medium text-muted-foreground hover:bg-accent"
                 >
-                  Clear
+                  Clear filters
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Ledger Table */}
