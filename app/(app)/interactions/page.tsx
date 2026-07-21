@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { usePermissions } from '@/hooks/use-permissions';
 import {
@@ -16,6 +16,7 @@ import {
 } from '@/types';
 import { toast } from 'sonner';
 import { SubmitButton } from '@/components/submit-button';
+import { SearchableCustomerSelect } from '@/components/searchable-customer-select';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
@@ -93,7 +94,49 @@ export default function InteractionsPage() {
   const [newFbType, setNewFbType] = useState<FeedbackType>(FeedbackType.COMPLAINT);
   const [newFbPriority, setNewFbPriority] = useState<FeedbackPriority>(FeedbackPriority.MEDIUM);
   const [newFbCustomer, setNewFbCustomer] = useState('');
+  const [feedbackCustomerSearch, setFeedbackCustomerSearch] = useState('');
+  const [debouncedFeedbackCustomerSearch, setDebouncedFeedbackCustomerSearch] = useState('');
+  const [pinnedFeedbackCustomer, setPinnedFeedbackCustomer] = useState<Customer | null>(null);
   const [resolutionNote, setResolutionNote] = useState('');
+
+  const { data: feedbackCustomerList, isFetching: feedbackCustomersFetching } =
+    useCustomers(
+      {
+        search: debouncedFeedbackCustomerSearch || undefined,
+        limit: 50,
+      },
+      { enabled: showFeedbackModal },
+    );
+
+  const feedbackModalCustomers = useMemo(() => {
+    const items = feedbackCustomerList?.items ?? [];
+    if (
+      pinnedFeedbackCustomer &&
+      !items.some((customer) => customer.id === pinnedFeedbackCustomer.id)
+    ) {
+      return [pinnedFeedbackCustomer, ...items];
+    }
+    return items;
+  }, [feedbackCustomerList, pinnedFeedbackCustomer]);
+
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setDebouncedFeedbackCustomerSearch(feedbackCustomerSearch.trim()),
+      300,
+    );
+    return () => clearTimeout(timer);
+  }, [feedbackCustomerSearch]);
+
+  useEffect(() => {
+    if (!newFbCustomer) {
+      setPinnedFeedbackCustomer(null);
+      return;
+    }
+    const selected = feedbackModalCustomers.find(
+      (customer) => customer.id === newFbCustomer,
+    );
+    if (selected) setPinnedFeedbackCustomer(selected);
+  }, [newFbCustomer, feedbackModalCustomers]);
 
   // --- Enquiry state ---
   const [showEnquiryModal, setShowEnquiryModal] = useState(false);
@@ -157,20 +200,32 @@ export default function InteractionsPage() {
   }, [feedbacks, customers]);
 
   // ============ Feedback Handlers ============
-  const handleSubmitFeedback = async (e: React.FormEvent) => {
+  const closeFeedbackModal = () => {
+    setShowFeedbackModal(false);
+    setNewFbCustomer('');
+    setFeedbackCustomerSearch('');
+    setDebouncedFeedbackCustomerSearch('');
+    setPinnedFeedbackCustomer(null);
+  };
+
+  const handleSubmitFeedback = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!newFbContent || !newFbCustomer) { toast.error('Customer name and content are required.'); return; }
-    const cust = findCustomerByName(newFbCustomer, customers);
-    if (HAS_API && !cust) { toast.error('Select a customer from the list (must exist in CRM).'); return; }
+    if (!newFbContent || !newFbCustomer) { toast.error('Customer and content are required.'); return; }
+    const cust =
+      feedbackModalCustomers.find((customer) => customer.id === newFbCustomer) ??
+      pinnedFeedbackCustomer;
+    if (!cust) { toast.error('Select a customer from the list (must exist in CRM).'); return; }
     try {
       await createFeedback.mutateAsync({
-        customerId: cust?.id || '0',
-        customerName: cust?.name || newFbCustomer,
+        customerId: cust.id,
+        customerName: cust.name,
         type: newFbType,
         content: newFbContent,
         priority: newFbPriority,
       });
-      setNewFbContent(''); setNewFbCustomer(''); setNewFbPriority(FeedbackPriority.MEDIUM); setShowFeedbackModal(false);
+      setNewFbContent('');
+      setNewFbPriority(FeedbackPriority.MEDIUM);
+      closeFeedbackModal();
       toast.success('Feedback recorded.');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to record feedback.');
@@ -352,7 +407,13 @@ export default function InteractionsPage() {
 
   // ============ Add button handler ============
   const handleAddNew = () => {
-    if (activeTab === 'feedback') setShowFeedbackModal(true);
+    if (activeTab === 'feedback') {
+      setNewFbCustomer('');
+      setFeedbackCustomerSearch('');
+      setDebouncedFeedbackCustomerSearch('');
+      setPinnedFeedbackCustomer(null);
+      setShowFeedbackModal(true);
+    }
     else if (activeTab === 'enquiries') setShowEnquiryModal(true);
     else setShowCompModal(true);
   };
@@ -770,10 +831,28 @@ export default function InteractionsPage() {
       {showFeedbackModal && (
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold">Record Feedback</h2><button onClick={() => setShowFeedbackModal(false)} className="text-muted-foreground hover:text-foreground"><X size={20} /></button></div>
+            <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold">Record Feedback</h2><button onClick={closeFeedbackModal} className="text-muted-foreground hover:text-foreground"><X size={20} /></button></div>
             <form onSubmit={handleSubmitFeedback} className="space-y-4">
-              <div className="space-y-2"><label className="text-sm font-medium">Customer Name *</label><input type="text" value={newFbCustomer} onChange={(e) => setNewFbCustomer(e.target.value)} list="fb-customers" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring" />
-                <datalist id="fb-customers">{customers.map((c) => <option key={c.id} value={c.name} />)}</datalist>
+              <div className="space-y-2">
+                <label htmlFor="feedback-customer" className="text-sm font-medium">Customer *</label>
+                <SearchableCustomerSelect
+                  id="feedback-customer"
+                  customers={feedbackModalCustomers}
+                  value={newFbCustomer}
+                  serverSearch
+                  onSearchChange={setFeedbackCustomerSearch}
+                  onChange={(customerId) => {
+                    setNewFbCustomer(customerId);
+                    const selected = feedbackModalCustomers.find(
+                      (customer) => customer.id === customerId,
+                    );
+                    if (selected) setPinnedFeedbackCustomer(selected);
+                  }}
+                  placeholder="Type to search by name, email, or company..."
+                />
+                {feedbackCustomersFetching && (
+                  <p className="text-xs text-muted-foreground">Searching customers…</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2"><label className="text-sm font-medium">Type</label><select value={newFbType} onChange={(e) => setNewFbType(e.target.value as FeedbackType)} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">{Object.values(FeedbackType).map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
