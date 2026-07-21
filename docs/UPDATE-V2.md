@@ -1,6 +1,16 @@
-# FudFarmer CRM — `Update-v2` Engineering Handoff
+# FudFarmer CRM — Insight Explorer & Suppliers (Reference Implementation)
 
-> Everything added/changed on the `Update-v2` branch, why it exists, how it's wired, and how to extend it. Read this before touching the new modules.
+> Everything in this branch, why it exists, how it's wired, and how to extend it.
+
+---
+
+## ⚠️ READ THIS FIRST — what this branch is
+
+This is a **reference / prototype implementation, not a drop-in merge.** It was built on a **client-only architecture** (all data in `localStorage` via `StorageService`, whole datasets pulled into memory and computed in the browser).
+
+The production `Update-v2` on GitHub is a **different architecture**: an **API-backed app** (`lib/api.ts`, `HAS_API`) whose hooks return **server-paginated slices** (`useCustomers` → `{ items, page }`), with **no `StorageService`** and **no Suppliers backend**. The two histories are unrelated.
+
+**So do not merge this branch as-is — it will not build against the production app.** Use it to read the code, the UX, and the analytics/NL/simulation logic, then **port each feature onto the API data layer.** Section 11 is the porting checklist. Everything below documents the prototype so you can port it accurately.
 
 ---
 
@@ -185,3 +195,39 @@ npx tsc --noEmit 2>&1 | grep -v "^\.next/"   # should be clean
 Then click through: Suppliers, Analytics (try a card's ✨ and the filters), Insights → Ask (*"Show orders over ₦50k"*), Explore, Simulate (*"What if I raise Beef prices 10%?"*), Compare.
 
 _Dev-server note: hot-reload can occasionally scramble in-memory React state or misroute a navigation. A hard refresh fixes it — it's the dev server, not the code._
+
+---
+
+## 11. Porting onto the production (API-backed) app
+
+The prototype's engines assume they can iterate over **complete** datasets in memory. Production hooks return **paginated, server-filtered** slices. Port in this order:
+
+### 11.1 Data access — the crux
+Every engine takes one `DataBundle` = `{ customers, sales, suppliers, supplierIssues, stockLogs, inventory, credits, agents }` (full arrays). On production you must supply those arrays. Options, cheapest first:
+1. **Fetch-all hooks** — add `useAllCustomers()`, `useAllSales()`, `useAllStockLogs()`, etc. that page through the existing endpoints (or call an `?all=1` / high `per_page`) and concatenate. Assemble the bundle from these. Fastest path; keeps all analytics client-side. Watch payload size — cache aggressively with React Query.
+2. **Server-side aggregation** — push the heavy analytics (Explore `runQuery`, Ask aggregate, Analytics cards) to new API endpoints that return the already-grouped results. More work, scales better. The prototype's `DATASETS`/`measures` are a precise spec of what each endpoint must compute.
+3. **Hybrid (recommended)** — fetch-all for the smaller datasets (suppliers, credits, agents, inventory) and server aggregation for the large ones (sales/stock logs). Keep Simulate client-side off a fetched baseline.
+
+Once a real `DataBundle` is available, `lib/{segmentation,insights,explore,ask,simulate,cardInsight}.ts` should work **unchanged** — they're pure functions over the bundle and `types.ts`. That's the whole point of keeping them decoupled.
+
+### 11.2 Suppliers module → needs a backend
+No supplier endpoints/tables exist in production. To ship it you need: `suppliers` + `supplier_issues` resources (CRUD), a `supplier_id` FK on products and stock movements, and hooks mirroring the existing pattern (`useSuppliers`, `useCreateSupplier`, `useSupplierIssues`, …). Then port `app/(app)/suppliers/page.tsx`, swapping its `StorageService` writes for those mutations. `types.ts` (`Supplier`, `SupplierIssue`, enums) is ready to reuse.
+
+### 11.3 Segmentation — reconcile with server `useSegments`
+Production already has server-side `useSegments`. Decide: keep segments **server-authored** (then `deriveSegments` becomes a client fallback / preview), or adopt the prototype's **derived-from-profile** model (then expose the rules server-side). Don't ship both silently — pick one source of truth. The rule set lives in `lib/segmentation.ts`.
+
+### 11.4 Page edits — re-apply by hand
+The prototype modified `analytics/customers/inventory/sales/page.tsx` and the dashboard, but production rewrote those pages. Re-apply the *intent* against their versions:
+- **Analytics:** per-card sort/filter, daily drill-down, the ✨ `InsightButton`, the "Ask AI" bar. `InsightButton` + `cardInsight.ts` drop in as-is (pure UI over a series).
+- **Sales:** multi-line cart, per-sale drill-down, `?open=<id>` deep-link reader.
+- **Customers/Inventory:** profile analytics, per-product drill-down, buyer→profile links.
+
+### 11.5 Insight Explorer page
+`app/(app)/insights/page.tsx` is self-contained UI; it only needs the `DataBundle` (11.1) and a route + sidebar entry (gate on the appropriate permission). Everything else is internal.
+
+### Suggested phasing
+1. Fetch-all/aggregation for the bundle (11.1) → stand up **Insight Explorer** (Ask/Explore/Simulate/Compare) — highest value, no backend schema changes.
+2. Add ✨ insight buttons to the real analytics cards.
+3. Backend suppliers resource → port the Suppliers module.
+4. Reconcile segmentation.
+5. Fold the remaining page-level drill-downs in.
