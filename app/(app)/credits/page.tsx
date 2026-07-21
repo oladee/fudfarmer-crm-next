@@ -18,8 +18,10 @@ import {
   ChevronRight,
   ArrowUpDown,
 } from 'lucide-react';
+import { PaginationControls } from '@/components/ui/pagination-controls';
 
 type SortKey = 'outstanding' | 'overdue' | 'oldest';
+const PAGE_SIZE = 20;
 
 export default function CreditsPage() {
   const { data: summary = [], isLoading } = useCreditSummary();
@@ -28,6 +30,7 @@ export default function CreditsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('outstanding');
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [page, setPage] = useState(1);
   const [selectedCustomer, setSelectedCustomer] = useState<CreditCustomerSummary | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -51,6 +54,13 @@ export default function CreditsPage() {
 
     return rows;
   }, [summary, searchTerm, sortBy, overdueOnly]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedRows = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, currentPage]);
 
   const openCustomer = (row: CreditCustomerSummary) => {
     setSelectedCustomer(row);
@@ -122,14 +132,20 @@ export default function CreditsPage() {
             type="text"
             placeholder="Search customer..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setPage(1);
+            }}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 pl-9 text-sm"
           />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            onClick={() => setOverdueOnly(!overdueOnly)}
+            onClick={() => {
+              setOverdueOnly(!overdueOnly);
+              setPage(1);
+            }}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               overdueOnly ? 'bg-red-600 text-white' : 'border hover:bg-accent'
             }`}
@@ -140,7 +156,10 @@ export default function CreditsPage() {
             <ArrowUpDown size={12} />
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortKey)}
+              onChange={(e) => {
+                setSortBy(e.target.value as SortKey);
+                setPage(1);
+              }}
               className="h-8 rounded-md border border-input bg-background px-2 text-xs font-medium"
             >
               <option value="outstanding">Sort: Outstanding</option>
@@ -181,7 +200,7 @@ export default function CreditsPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((row) => {
+              {paginatedRows.map((row) => {
                 const dueDays = row.oldestDueDate ? daysUntil(row.oldestDueDate) : null;
                 return (
                   <tr
@@ -236,6 +255,19 @@ export default function CreditsPage() {
               })}
             </tbody>
           </table>
+        </div>
+        <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {filtered.length === 0
+              ? 'No customers to show'
+              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)} of ${filtered.length}`}
+          </p>
+          <PaginationControls
+            page={currentPage}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            disabled={isLoading}
+          />
         </div>
       </div>
 
